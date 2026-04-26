@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
@@ -28,319 +28,85 @@ import {
 } from '@/app/components/ui/dialog';
 import { Badge } from '@/app/components/ui/badge';
 import { toast } from 'sonner';
-import { AlertCircle, CheckCircle2, X, Printer, PlusCircle, FileStack } from 'lucide-react';
+import { CheckCircle2, X, Printer, PlusCircle, FileStack } from 'lucide-react';
 import { useAuth } from '@/app/components/AuthContext';
+import { upsertCliente } from '@/lib/api/clientes';
+import { createFactura, fetchFacturasDelDia, fetchEventosActivos } from '@/lib/api/facturas';
+import { fetchLocales } from '@/lib/api/locales';
+import { fetchMetodosPago } from '@/lib/api/metodos-pago';
+import type { FacturaVista } from '@/lib/types';
 
-interface MetodoPago {
-  id: number;
+interface MetodoPagoLocal {
+  id: string;
   nombre: string;
   monto: number;
-  cuponId?: number;
+  cuponId?: string;
   cuponNombre?: string;
   cuponNumero?: number;
   entregablesCalculados?: number;
 }
 
-interface Factura {
+interface FacturaPendiente {
   id: number;
   eventoNombre: string;
-  eventoId: number;
-  eventoCuponId?: number;
-  eventoCuponNombre?: string;
+  eventoId: string;
   eventoValorMinimo: number;
   cedula: string;
   nombre: string;
   apellido: string;
   direccion: string;
-  telefono: string; // Agregamos teléfono
+  telefono: string;
   correo: string;
   genero: string;
   numeroFactura: string;
   montoTotal: number;
   fechaEmision: string;
-  metodosPago: MetodoPago[];
+  metodosPago: MetodoPagoLocal[];
   totalEntregables: number;
-  fechaRegistro: string;
-  timestampRegistro: number; // Agregamos timestamp para comparaciones confiables
-  usuarioRegistro?: string; // Nuevo: email del usuario que registra
-  localId?: number;
+  localId: string;
   localNombre?: string;
 }
 
-interface SaldoCliente {
-  cedula: string;
+interface EventoActivo {
+  id: string;
   nombre: string;
-  apellido: string;
-  totalEntregables: number;
-  entregablesEntregados: number;
-  saldoPendiente: number;
-  ultimaActualizacion: string;
+  valor_minimo: number;
+  valor_maximo: number;
+  activo: boolean;
+  evento_cupones: Array<{
+    cupon_id: string;
+    cupones: { id: string; nombre: string; numero: number };
+  }>;
 }
 
-// Datos de cupones con su número multiplicador
-const cuponesDisponibles = [
-  { id: 1, nombre: 'Dinners triple cupon', numero: 3, activo: true },
-  { id: 2, nombre: 'Cupon doble descuento', numero: 2, activo: true },
-  { id: 3, nombre: 'Mega cupon premium', numero: 5, activo: true },
-  { id: 4, nombre: 'Cupon simple', numero: 1, activo: true },
-  { id: 5, nombre: 'Cupon familiar', numero: 4, activo: true },
-  { id: 6, nombre: 'Cupon especial navidad', numero: 10, activo: false },
-  { id: 7, nombre: 'Cupon fin de semana', numero: 2, activo: true },
-  { id: 8, nombre: 'Cupon aniversario', numero: 7, activo: true },
-];
+interface LocalDisponible {
+  id: string;
+  nombre: string;
+  activo: boolean;
+}
 
-// Datos de ejemplo de eventos/campañas activos
-const eventosActivos = [
-  { 
-    id: 1, 
-    nombre: 'Campaña Verano 2026', 
-    activo: true, 
-    cuponId: 1, 
-    cuponNombre: 'Dinners triple cupon',
-    valorMinimo: 50,
-    valorMaximo: 500
-  },
-  { 
-    id: 2, 
-    nombre: 'Promoción Navideña', 
-    activo: true, 
-    cuponId: 6, 
-    cuponNombre: 'Cupon especial navidad',
-    valorMinimo: 100,
-    valorMaximo: 1000
-  },
-  { 
-    id: 3, 
-    nombre: 'Evento Aniversario', 
-    activo: true, 
-    cuponId: 8, 
-    cuponNombre: 'Cupon aniversario',
-    valorMinimo: 75,
-    valorMaximo: 750
-  },
-];
-
-// Datos de locales comerciales activos (simulación, normalmente vendría de un contexto global o API)
-const localesDisponibles = [
-  { id: 1, nombre: '3500 Restaurante', activo: true },
-  { id: 2, nombre: 'AutoMax', activo: true },
-  { id: 3, nombre: 'Banco Nacional', activo: true },
-  { id: 4, nombre: 'Farmacia Salud', activo: true },
-  { id: 5, nombre: 'Ferretería El Constructor', activo: true },
-  { id: 6, nombre: 'Moda y Estilo', activo: true },
-  { id: 7, nombre: 'SuperMercado Familiar', activo: true },
-  { id: 8, nombre: 'Tienda Retail Plus', activo: true },
-];
-
-// Datos de métodos de pago disponibles
-const metodosPagoDisponibles = [
-  { id: 1, nombre: 'Efectivo' },
-  { id: 2, nombre: 'Tarjeta de Crédito' },
-  { id: 3, nombre: 'Tarjeta de Débito' },
-  { id: 4, nombre: 'Transferencia' },
-  { id: 5, nombre: 'Cheque' },
-];
+interface MetodoPagoDisponible {
+  id: string;
+  nombre: string;
+  activo: boolean;
+}
 
 export function Registro() {
   const { user } = useAuth();
-  // Facturas ya registradas (persistentes en memoria)
-  const [facturas, setFacturas] = useState<Factura[]>([
-    // Factura 1 - Campaña Verano 2026
-    {
-      id: 1737100800000,
-      eventoNombre: 'Campaña Verano 2026',
-      eventoId: 1,
-      eventoCuponId: 1,
-      eventoCuponNombre: 'Dinners triple cupon',
-      eventoValorMinimo: 50,
-      cedula: '1720345678',
-      nombre: 'María',
-      apellido: 'González Pérez',
-      direccion: 'Av. Amazonas N23-45 y Wilson',
-      telefono: '0991234567',
-      correo: 'maria.gonzalez@email.com',
-      genero: 'femenino',
-      numeroFactura: '001-001-0000123',
-      montoTotal: 350.00,
-      fechaEmision: '2026-01-17',
-      metodosPago: [
-        {
-          id: 1,
-          nombre: 'Efectivo',
-          monto: 200.00,
-          entregablesCalculados: 4
-        },
-        {
-          id: 2,
-          nombre: 'Tarjeta de Crédito',
-          monto: 150.00,
-          cuponId: 1,
-          cuponNombre: 'Dinners triple cupon',
-          cuponNumero: 3,
-          entregablesCalculados: 9
-        }
-      ],
-      totalEntregables: 13,
-      fechaRegistro: new Date().toLocaleString(),
-      timestampRegistro: Date.now() - 3600000
-    },
-    // Factura 2 - Promoción Navideña
-    {
-      id: 1737104400000,
-      eventoNombre: 'Promoción Navideña',
-      eventoId: 2,
-      eventoCuponId: 6,
-      eventoCuponNombre: 'Cupon especial navidad',
-      eventoValorMinimo: 100,
-      cedula: '0912345678',
-      nombre: 'Carlos',
-      apellido: 'Ramírez Silva',
-      direccion: 'Calle García Moreno 512 y Sucre',
-      telefono: '0987654321',
-      correo: 'carlos.ramirez@email.com',
-      genero: 'masculino',
-      numeroFactura: '001-001-0000124',
-      montoTotal: 450.00,
-      fechaEmision: '2026-01-17',
-      metodosPago: [
-        {
-          id: 2,
-          nombre: 'Tarjeta de Crédito',
-          monto: 300.00,
-          entregablesCalculados: 3
-        },
-        {
-          id: 4,
-          nombre: 'Transferencia',
-          monto: 150.00,
-          cuponId: 6,
-          cuponNombre: 'Cupon especial navidad',
-          cuponNumero: 10,
-          entregablesCalculados: 15
-        }
-      ],
-      totalEntregables: 18,
-      fechaRegistro: new Date().toLocaleString(),
-      timestampRegistro: Date.now() - 7200000
-    },
-    // Factura 3 - Evento Aniversario
-    {
-      id: 1737108000000,
-      eventoNombre: 'Evento Aniversario',
-      eventoId: 3,
-      eventoCuponId: 8,
-      eventoCuponNombre: 'Cupon aniversario',
-      eventoValorMinimo: 75,
-      cedula: '1715678901',
-      nombre: 'Andrea',
-      apellido: 'Morales Vega',
-      direccion: 'Av. 6 de Diciembre N34-120 y Bosmediano',
-      telefono: '0998765432',
-      correo: 'andrea.morales@email.com',
-      genero: 'femenino',
-      numeroFactura: '001-001-0000125',
-      montoTotal: 525.00,
-      fechaEmision: '2026-01-17',
-      metodosPago: [
-        {
-          id: 1,
-          nombre: 'Efectivo',
-          monto: 225.00,
-          entregablesCalculados: 3
-        },
-        {
-          id: 3,
-          nombre: 'Tarjeta de Débito',
-          monto: 300.00,
-          cuponId: 8,
-          cuponNombre: 'Cupon aniversario',
-          cuponNumero: 7,
-          entregablesCalculados: 28
-        }
-      ],
-      totalEntregables: 31,
-      fechaRegistro: new Date().toLocaleString(),
-      timestampRegistro: Date.now() - 1800000
-    },
-    // Factura 4 - Campaña Verano 2026
-    {
-      id: 1737111600000,
-      eventoNombre: 'Campaña Verano 2026',
-      eventoId: 1,
-      eventoCuponId: 1,
-      eventoCuponNombre: 'Dinners triple cupon',
-      eventoValorMinimo: 50,
-      cedula: '0923456789',
-      nombre: 'Jorge',
-      apellido: 'Medina Castro',
-      direccion: 'Av. Mariscal Sucre S28-15 y Machala',
-      telefono: '0993456789',
-      correo: 'jorge.medina@email.com',
-      genero: 'masculino',
-      numeroFactura: '001-001-0000126',
-      montoTotal: 275.00,
-      fechaEmision: '2026-01-17',
-      metodosPago: [
-        {
-          id: 1,
-          nombre: 'Efectivo',
-          monto: 125.00,
-          entregablesCalculados: 2
-        },
-        {
-          id: 2,
-          nombre: 'Tarjeta de Crédito',
-          monto: 150.00,
-          cuponId: 1,
-          cuponNombre: 'Dinners triple cupon',
-          cuponNumero: 3,
-          entregablesCalculados: 9
-        }
-      ],
-      totalEntregables: 11,
-      fechaRegistro: new Date().toLocaleString(),
-      timestampRegistro: Date.now() - 900000
-    },
-    // Factura 5 - Promoción Navideña
-    {
-      id: 1737115200000,
-      eventoNombre: 'Promoción Navideña',
-      eventoId: 2,
-      eventoCuponId: 6,
-      eventoCuponNombre: 'Cupon especial navidad',
-      eventoValorMinimo: 100,
-      cedula: '1708901234',
-      nombre: 'Sofía',
-      apellido: 'Ruiz Alvarado',
-      direccion: 'Calle Imbabura 234 y Pichincha',
-      telefono: '0996543210',
-      correo: 'sofia.ruiz@email.com',
-      genero: 'femenino',
-      numeroFactura: '001-001-0000127',
-      montoTotal: 600.00,
-      fechaEmision: '2026-01-17',
-      metodosPago: [
-        {
-          id: 1,
-          nombre: 'Efectivo',
-          monto: 200.00,
-          entregablesCalculados: 2
-        },
-        {
-          id: 2,
-          nombre: 'Tarjeta de Crédito',
-          monto: 400.00,
-          cuponId: 6,
-          cuponNombre: 'Cupon especial navidad',
-          cuponNumero: 10,
-          entregablesCalculados: 40
-        }
-      ],
-      totalEntregables: 42,
-      fechaRegistro: new Date().toLocaleString(),
-      timestampRegistro: Date.now() - 300000
-    }
-  ]);
+
+  // Remote data
+  const [eventosActivos, setEventosActivos] = useState<EventoActivo[]>([]);
+  const [localesDisponibles, setLocalesDisponibles] = useState<LocalDisponible[]>([]);
+  const [metodosPagoDisponibles, setMetodosPagoDisponibles] = useState<MetodoPagoDisponible[]>([]);
+  const [facturas, setFacturas] = useState<FacturaVista[]>([]);
+
+  useEffect(() => {
+    fetchEventosActivos().then(setEventosActivos).catch(() => toast.error('Error al cargar eventos'));
+    fetchLocales().then((data) => setLocalesDisponibles(data.filter((l) => l.activo))).catch(() => {});
+    fetchMetodosPago().then((data) => setMetodosPagoDisponibles(data.filter((m) => m.activo))).catch(() => {});
+    fetchFacturasDelDia().then(setFacturas).catch(() => toast.error('Error al cargar facturas'));
+  }, []);
+
   // Estado del cliente (persistente mientras se agregan facturas)
   const [cedula, setCedula] = useState('');
   const [nombre, setNombre] = useState('');
@@ -362,15 +128,14 @@ export function Registro() {
     return `${d.getFullYear()}-${month}-${day}`;
   };
   const [fechaEmision, setFechaEmision] = useState(getFechaActual());
-  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
+  const [metodosPago, setMetodosPago] = useState<MetodoPagoLocal[]>([]);
   const [metodoSeleccionado, setMetodoSeleccionado] = useState('');
   const [montoMetodo, setMontoMetodo] = useState('');
   const [cuponSeleccionado, setCuponSeleccionado] = useState('');
-  const [error, setError] = useState('');
   // Facturas pendientes por registrar (en memoria temporal)
-  const [facturasPendientes, setFacturasPendientes] = useState<Factura[]>([]);
+  const [facturasPendientes, setFacturasPendientes] = useState<FacturaPendiente[]>([]);
   const [mostrarDialogoTickets, setMostrarDialogoTickets] = useState(false);
-  const [facturasActuales, setFacturasActuales] = useState<Factura[]>([]);
+  const [facturasActuales, setFacturasActuales] = useState<FacturaPendiente[]>([]);
 
   const calcularTotalMetodos = () => {
     return metodosPago.reduce((sum, m) => sum + m.monto, 0);
@@ -379,44 +144,41 @@ export function Registro() {
   const agregarMetodoPago = () => {
     if (!metodoSeleccionado || !montoMetodo) {
       toast.error('Selecciona un método de pago y especifica el monto');
-      setError('');
       return;
     }
     if (!eventoId) {
       toast.error('Debes seleccionar un evento primero');
-      setError('');
       return;
     }
     const monto = parseFloat(montoMetodo);
     if (isNaN(monto) || monto <= 0) {
       toast.error('El monto debe ser mayor a 0');
-      setError('');
       return;
     }
     const totalActual = calcularTotalMetodos();
     const montoTotalNum = parseFloat(montoTotal);
     if (totalActual + monto > montoTotalNum) {
       toast.error('El total de los métodos de pago excede el monto de la factura');
-      setError('');
       return;
     }
 
     const metodoNombre = metodosPagoDisponibles.find(
-      (m) => m.id.toString() === metodoSeleccionado
+      (m) => m.id === metodoSeleccionado
     )?.nombre || '';
 
     // Obtener datos del evento
-    const evento = eventosActivos.find((e) => e.id.toString() === eventoId);
-    const valorMinimo = evento?.valorMinimo || 1;
+    const evento = eventosActivos.find((e) => e.id === eventoId);
+    const valorMinimo = evento?.valor_minimo || 1;
 
     // Obtener número del cupón (multiplicador)
     let cuponNumero = 1; // Por defecto sin cupón = multiplicador 1
-    let cuponNombre = undefined;
-    let cuponId = undefined;
+    let cuponNombre: string | undefined = undefined;
+    let cuponId: string | undefined = undefined;
 
     // Solo si hay un cupón seleccionado Y no es "none"
     if (cuponSeleccionado && cuponSeleccionado !== 'none' && cuponSeleccionado !== '') {
-      const cupon = cuponesDisponibles.find((c) => c.id.toString() === cuponSeleccionado);
+      const eventoCupones = eventosActivos.find((e) => e.id === eventoId)?.evento_cupones ?? [];
+      const cupon = eventoCupones.find((ec) => ec.cupones.id === cuponSeleccionado)?.cupones;
       if (cupon) {
         cuponNumero = cupon.numero;
         cuponNombre = cupon.nombre;
@@ -439,7 +201,7 @@ export function Registro() {
     setMetodosPago([
       ...metodosPago,
       {
-        id: parseInt(metodoSeleccionado),
+        id: metodoSeleccionado,
         nombre: metodoNombre,
         monto: monto,
         cuponId: cuponId,
@@ -452,7 +214,6 @@ export function Registro() {
     setMetodoSeleccionado('');
     setMontoMetodo('');
     setCuponSeleccionado('');
-    setError('');
   };
 
   const eliminarMetodoPago = (index: number) => {
@@ -468,7 +229,6 @@ export function Registro() {
     setMetodoSeleccionado('');
     setMontoMetodo('');
     setCuponSeleccionado('');
-    setError('');
   };
 
   // Limpiar todo (cliente, evento y factura)
@@ -490,34 +250,28 @@ export function Registro() {
     const campos = [eventoId, localId, cedula, nombre, apellido, direccion, telefono, correo, genero, numeroFactura, montoTotal, fechaEmision];
     if (campos.some((c) => !c || c.trim() === '')) {
       toast.error('Todos los campos son obligatorios');
-      setError('');
       return;
     }
     if (metodosPago.length === 0) {
       toast.error('Debe agregar al menos un método de pago');
-      setError('');
       return;
     }
     const totalMetodos = calcularTotalMetodos();
     const montoTotalNum = parseFloat(montoTotal);
     if (totalMetodos !== montoTotalNum) {
       toast.error(`El total de los métodos de pago ($${totalMetodos.toFixed(2)}) debe ser igual al monto total de la factura ($${montoTotalNum.toFixed(2)})`);
-      setError('');
       return;
     }
-    const eventoNombre = eventosActivos.find((e) => e.id.toString() === eventoId)?.nombre || '';
-    const eventoCuponId = eventosActivos.find((e) => e.id.toString() === eventoId)?.cuponId;
-    const eventoCuponNombre = eventosActivos.find((e) => e.id.toString() === eventoId)?.cuponNombre;
-    const eventoValorMinimo = eventosActivos.find((e) => e.id.toString() === eventoId)?.valorMinimo || 0;
-    const localNombre = localesDisponibles.find((l) => l.id.toString() === localId)?.nombre || '';
-    const nuevaFactura: Factura = {
+    const eventoSeleccionado = eventosActivos.find((e) => e.id === eventoId);
+    const eventoNombre = eventoSeleccionado?.nombre || '';
+    const eventoValorMinimo = eventoSeleccionado?.valor_minimo || 0;
+    const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
+    const nuevaFactura: FacturaPendiente = {
       id: Date.now() + Math.floor(Math.random() * 10000),
       eventoNombre,
-      localId: parseInt(localId),
+      localId,
       localNombre,
-      eventoId: parseInt(eventoId),
-      eventoCuponId,
-      eventoCuponNombre,
+      eventoId,
       eventoValorMinimo,
       cedula,
       nombre,
@@ -531,41 +285,81 @@ export function Registro() {
       fechaEmision,
       metodosPago: [...metodosPago],
       totalEntregables: metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0),
-      fechaRegistro: new Date().toLocaleString(),
-      timestampRegistro: Date.now(),
-      usuarioRegistro: user ? user.email : 'anonimo',
     };
     setFacturasPendientes([nuevaFactura, ...facturasPendientes]);
     limpiarFactura();
-    setError('');
   };
 
-  // Registrar todas las facturas pendientes
-  const registrarFacturas = () => {
+  // Registrar todas las facturas pendientes contra Supabase
+  const registrarFacturas = async () => {
     if (facturasPendientes.length === 0) {
       toast.error('No hay facturas pendientes por registrar');
-      setError('');
       return;
     }
-    setFacturas([...facturasPendientes, ...facturas]);
-    setFacturasActuales(facturasPendientes);
-    setFacturasPendientes([]);
-    setError('');
-    setMostrarDialogoTickets(true);
-    limpiarCliente(); // Limpiar todo después de registrar/imprimir
+    if (!user) {
+      toast.error('Debes iniciar sesión para registrar facturas');
+      return;
+    }
+
+    try {
+      for (const fp of facturasPendientes) {
+        // 1. Upsert cliente
+        const cliente = await upsertCliente({
+          cedula: fp.cedula,
+          nombre: fp.nombre,
+          apellido: fp.apellido,
+          direccion: fp.direccion,
+          telefono: fp.telefono,
+          correo: fp.correo,
+          genero: fp.genero as 'masculino' | 'femenino',
+        });
+
+        // 2. Crear factura
+        await createFactura(
+          {
+            evento_id: fp.eventoId,
+            cliente_id: cliente.id,
+            local_id: fp.localId,
+            usuario_id: user.id,
+            numero_factura: fp.numeroFactura,
+            monto_total: fp.montoTotal,
+            fecha_emision: fp.fechaEmision,
+            total_entregables: fp.totalEntregables,
+          },
+          fp.metodosPago.map((m) => ({
+            metodo_pago_id: m.id,
+            monto: m.monto,
+            cupon_id: m.cuponId ?? null,
+            cupon_numero: m.cuponNumero ?? null,
+            entregables_calculados: m.entregablesCalculados ?? 0,
+          }))
+        );
+      }
+
+      // Recargar facturas del día
+      const actualizadas = await fetchFacturasDelDia();
+      setFacturas(actualizadas);
+
+      setFacturasActuales(facturasPendientes);
+      setFacturasPendientes([]);
+      setMostrarDialogoTickets(true);
+      limpiarCliente();
+    } catch {
+      toast.error('Error al registrar las facturas');
+    }
   };
 
   // Función para ocultar cédula parcialmente (muestra últimos 3 dígitos)
-  const ocultarCedula = (cedula: string) => {
-    if (cedula.length <= 3) return cedula;
-    const visible = cedula.slice(-3);
-    const oculto = 'X'.repeat(cedula.length - 3);
+  const ocultarCedula = (ced: string) => {
+    if (ced.length <= 3) return ced;
+    const visible = ced.slice(-3);
+    const oculto = 'X'.repeat(ced.length - 3);
     return oculto + visible;
   };
 
   // Función para generar número de ticket único
   const generarNumeroTicket = (facturaId: number, indice: number) => {
-    const base = facturaId % 10000; // Tomar los últimos 4 dígitos del ID
+    const base = facturaId % 10000;
     return base + indice;
   };
 
@@ -574,15 +368,8 @@ export function Registro() {
     window.print();
   };
 
-  // Filtrar facturas del día usando timestamp para evitar problemas de parseo
-  const facturasDelDia = facturas.filter((f) => {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0); // Inicio del día de hoy
-    const finDia = new Date();
-    finDia.setHours(23, 59, 59, 999); // Fin del día de hoy
-    
-    return f.timestampRegistro >= hoy.getTime() && f.timestampRegistro <= finDia.getTime();
-  });
+  // Facturas del día vienen de Supabase (ya filtradas por fecha)
+  const facturasDelDia = facturas;
 
   return (
     <div className="p-8">
@@ -604,7 +391,6 @@ export function Registro() {
             </CardHeader>
             <CardContent className="space-y-6">
 
-
               <div>
                 <Label htmlFor="evento">Evento/Campaña *</Label>
                 <Select value={eventoId} onValueChange={setEventoId}>
@@ -613,7 +399,7 @@ export function Registro() {
                   </SelectTrigger>
                   <SelectContent>
                     {eventosActivos.map((evento) => (
-                      <SelectItem key={evento.id} value={evento.id.toString()}>
+                      <SelectItem key={evento.id} value={evento.id}>
                         {evento.nombre}
                       </SelectItem>
                     ))}
@@ -701,7 +487,7 @@ export function Registro() {
 
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold mb-4">Información de la Factura</h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div>
                     <Label htmlFor="localComercial">Local Comercial *</Label>
@@ -710,8 +496,8 @@ export function Registro() {
                         <SelectValue placeholder="Selecciona un local" />
                       </SelectTrigger>
                       <SelectContent>
-                        {localesDisponibles.filter(l => l.activo).map((local) => (
-                          <SelectItem key={local.id} value={local.id.toString()}>
+                        {localesDisponibles.map((local) => (
+                          <SelectItem key={local.id} value={local.id}>
                             {local.nombre}
                           </SelectItem>
                         ))}
@@ -754,7 +540,7 @@ export function Registro() {
 
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold mb-4">Métodos de Pago</h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div>
                     <Label htmlFor="metodoPago">Método de Pago</Label>
@@ -764,7 +550,7 @@ export function Registro() {
                       </SelectTrigger>
                       <SelectContent>
                         {metodosPagoDisponibles.map((metodo) => (
-                          <SelectItem key={metodo.id} value={metodo.id.toString()}>
+                          <SelectItem key={metodo.id} value={metodo.id}>
                             {metodo.nombre}
                           </SelectItem>
                         ))}
@@ -786,8 +572,8 @@ export function Registro() {
 
                   <div>
                     <Label htmlFor="cuponMetodo">Cupón (Opcional)</Label>
-                    <Select 
-                      value={cuponSeleccionado} 
+                    <Select
+                      value={cuponSeleccionado}
                       onValueChange={setCuponSeleccionado}
                       disabled={!eventoId}
                     >
@@ -796,13 +582,14 @@ export function Registro() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Sin cupón</SelectItem>
-                        {eventoId && eventosActivos
-                          .filter((e) => e.id.toString() === eventoId)
-                          .map((evento) => (
-                            <SelectItem key={evento.cuponId} value={evento.cuponId.toString()}>
-                              {evento.cuponNombre}
-                            </SelectItem>
-                          ))}
+                        {eventoId &&
+                          eventosActivos
+                            .find((e) => e.id === eventoId)
+                            ?.evento_cupones.map(({ cupones }) => (
+                              <SelectItem key={cupones.id} value={cupones.id}>
+                                {cupones.nombre} (x{cupones.numero})
+                              </SelectItem>
+                            ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -968,45 +755,45 @@ export function Registro() {
                     <TableBody>
                       {facturasDelDia.map((factura) => (
                         <TableRow key={factura.id}>
-                          <TableCell className="font-medium">{factura.eventoNombre}</TableCell>
-                          <TableCell>{factura.cedula}</TableCell>
+                          <TableCell className="font-medium">{factura.eventos_campanas?.nombre}</TableCell>
+                          <TableCell>{factura.clientes?.cedula}</TableCell>
                           <TableCell>
-                            {factura.nombre} {factura.apellido}
+                            {factura.clientes?.nombre} {factura.clientes?.apellido}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={factura.genero === 'masculino' ? 'default' : 'secondary'}>
-                              {factura.genero}
+                            <Badge variant={factura.clientes?.genero === 'masculino' ? 'default' : 'secondary'}>
+                              {factura.clientes?.genero}
                             </Badge>
                           </TableCell>
-                          <TableCell>{factura.numeroFactura}</TableCell>
+                          <TableCell>{factura.numero_factura}</TableCell>
                           <TableCell className="font-semibold">
-                            ${factura.montoTotal.toFixed(2)}
+                            ${factura.monto_total.toFixed(2)}
                           </TableCell>
                           <TableCell>
                             <Badge variant="default" className="bg-green-600">
-                              {factura.totalEntregables}
+                              {factura.total_entregables}
                             </Badge>
                           </TableCell>
-                          <TableCell>{factura.fechaEmision}</TableCell>
+                          <TableCell>{factura.fecha_emision}</TableCell>
                           <TableCell>
                             <div className="space-y-1">
-                              {factura.metodosPago.map((metodo, idx) => (
+                              {factura.factura_metodos_pago.map((metodo, idx) => (
                                 <div key={idx} className="text-sm">
-                                  <span className="font-medium">{metodo.nombre}:</span> ${metodo.monto.toFixed(2)}
-                                  {metodo.cuponNombre && (
+                                  <span className="font-medium">{metodo.metodos_pago?.nombre}:</span> ${metodo.monto.toFixed(2)}
+                                  {metodo.cupones?.nombre && (
                                     <span className="ml-2 text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
-                                      {metodo.cuponNombre} (x{metodo.cuponNumero})
+                                      {metodo.cupones.nombre} (x{metodo.cupon_numero})
                                     </span>
                                   )}
                                   <span className="ml-2 text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">
-                                    {metodo.entregablesCalculados} entregables
+                                    {metodo.entregables_calculados} entregables
                                   </span>
                                 </div>
                               ))}
                             </div>
                           </TableCell>
                           <TableCell className="text-sm text-gray-600">
-                            {factura.fechaRegistro}
+                            {new Date(factura.fecha_registro).toLocaleString()}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1035,7 +822,7 @@ export function Registro() {
             <>
               <div className="flex-1 overflow-y-auto px-6 py-4">
                 <div className="space-y-10">
-                  {facturasActuales.map((facturaActual, idxFactura) => (
+                  {facturasActuales.map((facturaActual) => (
                     <div key={facturaActual.id}>
                       <div className="bg-gray-50 border rounded-lg p-4 mb-4">
                         <h3 className="font-semibold mb-3">Resumen de Factura</h3>
