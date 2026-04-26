@@ -84,26 +84,57 @@ export async function updateEvento(
 ): Promise<EventoCampana> {
   const { categoria_ids, cupon_ids, entregable_ids, ...eventoData } = payload;
 
-  const { data: evento, error } = await supabase
-    .from('eventos_campanas')
-    .update(eventoData)
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-
-  if (categoria_ids !== undefined || cupon_ids !== undefined || entregable_ids !== undefined) {
-    await deletePivots(id);
-    await insertPivots(
-      id,
-      categoria_ids ?? [],
-      cupon_ids ?? [],
-      entregable_ids ?? []
-    );
+  if (Object.keys(eventoData).length > 0) {
+    const { error } = await supabase
+      .from('eventos_campanas')
+      .update(eventoData)
+      .eq('id', id);
+    if (error) throw error;
   }
 
-  const updated = await fetchEventoById(id);
-  return updated;
+  if (categoria_ids !== undefined) {
+    const { error: delErr } = await supabase
+      .from('evento_categorias')
+      .delete()
+      .eq('evento_id', id);
+    if (delErr) throw delErr;
+    if (categoria_ids.length > 0) {
+      const { error: insErr } = await supabase
+        .from('evento_categorias')
+        .insert(categoria_ids.map((cid) => ({ evento_id: id, categoria_id: cid })));
+      if (insErr) throw insErr;
+    }
+  }
+
+  if (cupon_ids !== undefined) {
+    const { error: delErr } = await supabase
+      .from('evento_cupones')
+      .delete()
+      .eq('evento_id', id);
+    if (delErr) throw delErr;
+    if (cupon_ids.length > 0) {
+      const { error: insErr } = await supabase
+        .from('evento_cupones')
+        .insert(cupon_ids.map((cid) => ({ evento_id: id, cupon_id: cid })));
+      if (insErr) throw insErr;
+    }
+  }
+
+  if (entregable_ids !== undefined) {
+    const { error: delErr } = await supabase
+      .from('evento_entregables')
+      .delete()
+      .eq('evento_id', id);
+    if (delErr) throw delErr;
+    if (entregable_ids.length > 0) {
+      const { error: insErr } = await supabase
+        .from('evento_entregables')
+        .insert(entregable_ids.map((eid) => ({ evento_id: id, entregable_id: eid })));
+      if (insErr) throw insErr;
+    }
+  }
+
+  return fetchEventoById(id);
 }
 
 export async function deleteEvento(id: string): Promise<void> {
@@ -127,13 +158,6 @@ async function fetchEventoById(id: string): Promise<EventoCampana> {
   return mapRawEvento(data as RawEvento);
 }
 
-async function deletePivots(eventoId: string): Promise<void> {
-  await Promise.all([
-    supabase.from('evento_categorias').delete().eq('evento_id', eventoId),
-    supabase.from('evento_cupones').delete().eq('evento_id', eventoId),
-    supabase.from('evento_entregables').delete().eq('evento_id', eventoId),
-  ]);
-}
 
 async function insertPivots(
   eventoId: string,
