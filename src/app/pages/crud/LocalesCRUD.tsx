@@ -1,66 +1,59 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CRUDTemplate } from '@/app/components/CRUDTemplate';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Switch } from '@/app/components/ui/switch';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/app/components/ui/select';
-
-interface Local {
-  id: number;
-  nombre: string;
-  activo: boolean;
-  categoriaId: number;
-}
-
-// Categorías disponibles en el sistema
-const CATEGORIAS = [
-  { id: 1, nombre: 'Accesorios' },
-  { id: 2, nombre: 'Autos' },
-  { id: 3, nombre: 'Bancos' },
-  { id: 4, nombre: 'Entretenimiento' },
-  { id: 5, nombre: 'Familiar' },
-  { id: 6, nombre: 'Farmacias' },
-  { id: 7, nombre: 'Ferreterías' },
-  { id: 8, nombre: 'Retail' },
-];
+import { toast } from 'sonner';
+import type { Local, Categoria } from '@/lib/types';
+import { fetchLocales, createLocal, updateLocal, deleteLocal } from '@/lib/api/locales';
+import { fetchCategorias } from '@/lib/api/categorias';
 
 export function LocalesCRUD() {
-  const [locales, setLocales] = useState<Local[]>([
-    { id: 1, nombre: '3500 Restaurante', activo: true, categoriaId: 4 },
-    { id: 2, nombre: 'AutoMax', activo: true, categoriaId: 2 },
-    { id: 3, nombre: 'Banco Nacional', activo: true, categoriaId: 3 },
-    { id: 4, nombre: 'Farmacia Salud', activo: true, categoriaId: 6 },
-    { id: 5, nombre: 'Ferretería El Constructor', activo: true, categoriaId: 7 },
-    { id: 6, nombre: 'Moda y Estilo', activo: true, categoriaId: 1 },
-    { id: 7, nombre: 'SuperMercado Familiar', activo: true, categoriaId: 5 },
-    { id: 8, nombre: 'Tienda Retail Plus', activo: true, categoriaId: 8 },
-  ]);
+  const [locales, setLocales] = useState<Local[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
 
-  const handleAdd = (local: Omit<Local, 'id'>) => {
-    const newLocal = { ...local, id: Date.now() };
-    setLocales([...locales, newLocal]);
+  useEffect(() => {
+    fetchLocales().then(setLocales).catch(() => toast.error('Error al cargar locales'));
+    fetchCategorias().then(setCategorias).catch(() => toast.error('Error al cargar categorías'));
+  }, []);
+
+  const getCategoriaNombre = (categoriaId: string) =>
+    categorias.find((c) => c.id === categoriaId)?.nombre || 'Sin categoría';
+
+  const handleAdd = async (local: Omit<Local, 'id'>) => {
+    try {
+      const created = await createLocal(local);
+      setLocales((prev) => [...prev, created]);
+    } catch {
+      toast.error('Error al crear el local');
+    }
   };
 
-  const handleEdit = (id: number, local: Partial<Local>) => {
-    setLocales(locales.map((l) => (l.id === id ? { ...l, ...local } : l)));
+  const handleEdit = async (id: string | number, local: Partial<Local>) => {
+    try {
+      const updated = await updateLocal(String(id), local);
+      setLocales((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    } catch {
+      toast.error('Error al actualizar el local');
+    }
   };
 
-  const handleDelete = (id: number) => {
-    setLocales(locales.filter((l) => l.id !== id));
+  const handleDelete = async (id: string | number) => {
+    try {
+      await deleteLocal(String(id));
+      setLocales((prev) => prev.filter((l) => l.id !== String(id)));
+    } catch {
+      toast.error('Error al eliminar el local');
+    }
   };
 
-  const getCategoriaNombre = (categoriaId: number) => {
-    const categoria = CATEGORIAS.find((c) => c.id === categoriaId);
-    return categoria?.nombre || 'Sin categoría';
-  };
-
-  const renderForm = (item: Partial<Local> | null, onChange: (field: keyof Local, value: any) => void) => (
+  const renderForm = (
+    item: Partial<Local> | null,
+    onChange: (field: keyof Local, value: any) => void
+  ) => (
     <>
       <div>
         <Label htmlFor="nombre">Nombre</Label>
@@ -74,15 +67,15 @@ export function LocalesCRUD() {
       <div>
         <Label htmlFor="categoria">Categoría</Label>
         <Select
-          defaultValue={item?.categoriaId?.toString()}
-          onValueChange={(value) => onChange('categoriaId', parseInt(value))}
+          defaultValue={item?.categoria_id}
+          onValueChange={(value) => onChange('categoria_id', value)}
         >
           <SelectTrigger>
             <SelectValue placeholder="Selecciona una categoría" />
           </SelectTrigger>
           <SelectContent>
-            {CATEGORIAS.map((categoria) => (
-              <SelectItem key={categoria.id} value={categoria.id.toString()}>
+            {categorias.filter((c) => c.activo).map((categoria) => (
+              <SelectItem key={categoria.id} value={categoria.id}>
                 {categoria.nombre}
               </SelectItem>
             ))}
@@ -108,21 +101,14 @@ export function LocalesCRUD() {
       columns={[
         { key: 'nombre', label: 'Nombre' },
         {
-          key: 'categoriaId',
+          key: 'categoria_id',
           label: 'Categoría',
-          render: (item) => getCategoriaNombre(item.categoriaId),
+          render: (item) => getCategoriaNombre(item.categoria_id),
         },
         {
-          key: 'activo',
-          label: 'Estado',
+          key: 'activo', label: 'Estado',
           render: (item) => (
-            <span
-              className={`px-2 py-1 rounded-full text-xs ${
-                item.activo
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-gray-100 text-gray-800'
-              }`}
-            >
+            <span className={`px-2 py-1 rounded-full text-xs ${item.activo ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
               {item.activo ? 'Activo' : 'Inactivo'}
             </span>
           ),
