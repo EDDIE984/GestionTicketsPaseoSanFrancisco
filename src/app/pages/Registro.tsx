@@ -190,14 +190,6 @@ export function Registro() {
     const entregablesBase = Math.floor(monto / valorMinimo);
     const entregablesCalculados = entregablesBase * cuponNumero;
 
-    console.log('DEBUG Cálculo:', {
-      monto,
-      valorMinimo,
-      cuponNumero,
-      entregablesBase,
-      entregablesCalculados
-    });
-
     setMetodosPago([
       ...metodosPago,
       {
