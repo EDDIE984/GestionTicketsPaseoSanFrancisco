@@ -1,183 +1,102 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CRUDTemplate } from '@/app/components/CRUDTemplate';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import { Button } from '@/app/components/ui/button';
+import { Switch } from '@/app/components/ui/switch';
+import { toast } from 'sonner';
+import type { EventoCampana, Categoria, Cupon, Entregable } from '@/lib/types';
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/app/components/ui/select';
-
-interface EventoCampana {
-  id: number;
-  nombre: string;
-  fechaInicio: string;
-  fechaFin: string;
-  categoriaIds: number[];
-  categoriaNombre?: string;
-  valorMinimo: number;
-  valorMaximo: number;
-  entregableId: number;
-  entregableNombre?: string;
-  cuponId: number;
-  cuponNombre?: string;
-}
-
-// Datos de referencia - En un caso real, estos vendrían de un contexto o API
-const categorias = [
-  { id: 1, nombre: 'Accesorios', activo: true },
-  { id: 2, nombre: 'Autos', activo: true },
-  { id: 3, nombre: 'Bancos', activo: true },
-  { id: 4, nombre: 'Entretenimiento', activo: true },
-  { id: 5, nombre: 'Familiar', activo: true },
-  { id: 6, nombre: 'Farmacias', activo: true },
-  { id: 7, nombre: 'Ferreterías', activo: true },
-  { id: 8, nombre: 'Retail', activo: true },
-];
-
-const entregables = [
-  { id: 1, nombre: 'Camiseta Oficial', activo: true },
-  { id: 2, nombre: 'Gorra', activo: true },
-  { id: 3, nombre: 'Kit', activo: true },
-  { id: 4, nombre: 'Ticket', activo: true },
-];
-
-const cupones = [
-  { id: 1, nombre: 'Dinners triple cupon', activo: true },
-  { id: 2, nombre: 'Cupon doble descuento', activo: true },
-  { id: 3, nombre: 'Mega cupon premium', activo: true },
-  { id: 4, nombre: 'Cupon simple', activo: true },
-  { id: 5, nombre: 'Cupon familiar', activo: true },
-  { id: 6, nombre: 'Cupon especial navidad', activo: false },
-  { id: 7, nombre: 'Cupon fin de semana', activo: true },
-  { id: 8, nombre: 'Cupon aniversario', activo: true },
-];
+  fetchEventos,
+  createEvento,
+  updateEvento,
+  deleteEvento,
+} from '@/lib/api/eventos-campanas';
+import { fetchCategorias } from '@/lib/api/categorias';
+import { fetchCupones } from '@/lib/api/cupones';
+import { fetchEntregables } from '@/lib/api/entregables';
 
 export function EventosCampanas() {
-  const [eventos, setEventos] = useState<EventoCampana[]>([
-    {
-      id: 1,
-      nombre: 'Campaña Verano 2026',
-      fechaInicio: '2026-03-01',
-      fechaFin: '2026-03-31',
-      categoriaIds: [4],
-      categoriaNombre: 'Entretenimiento',
-      valorMinimo: 50,
-      valorMaximo: 500,
-      entregableId: 3,
-      entregableNombre: 'Kit',
-      cuponId: 1,
-      cuponNombre: 'Dinners triple cupon',
-    },
-    {
-      id: 2,
-      nombre: 'Promoción Navideña',
-      fechaInicio: '2025-12-01',
-      fechaFin: '2025-12-31',
-      categoriaIds: [8],
-      categoriaNombre: 'Retail',
-      valorMinimo: 100,
-      valorMaximo: 1000,
-      entregableId: 1,
-      entregableNombre: 'Camiseta Oficial',
-      cuponId: 6,
-      cuponNombre: 'Cupon especial navidad',
-    },
-    {
-      id: 3,
-      nombre: 'Evento Aniversario',
-      fechaInicio: '2026-06-15',
-      fechaFin: '2026-06-30',
-      categoriaIds: [5],
-      categoriaNombre: 'Familiar',
-      valorMinimo: 75,
-      valorMaximo: 750,
-      entregableId: 4,
-      entregableNombre: 'Ticket',
-      cuponId: 8,
-      cuponNombre: 'Cupon aniversario',
-    },
-  ]);
+  const [eventos, setEventos] = useState<EventoCampana[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [cupones, setCupones] = useState<Cupon[]>([]);
+  const [entregables, setEntregables] = useState<Entregable[]>([]);
 
-  const handleAdd = (evento: Omit<EventoCampana, 'id'>) => {
-    const categoriaNombres = categorias
-      .filter((c) => evento.categoriaIds.includes(c.id))
-      .map((c) => c.nombre)
-      .join(', ');
-    const entregable = entregables.find((e) => e.id === evento.entregableId);
-    const cupon = cupones.find((c) => c.id === evento.cuponId);
+  useEffect(() => {
+    fetchEventos().then(setEventos).catch(() => toast.error('Error al cargar eventos'));
+    fetchCategorias().then(setCategorias).catch(() => {});
+    fetchCupones().then(setCupones).catch(() => {});
+    fetchEntregables().then(setEntregables).catch(() => {});
+  }, []);
 
-    const newEvento = {
-      ...evento,
-      id: Date.now(),
-      categoriaNombre: categoriaNombres,
-      entregableNombre: entregable?.nombre,
-      cuponNombre: cupon?.nombre,
-    };
-    setEventos([...eventos, newEvento]);
+  const handleAdd = async (form: Omit<EventoCampana, 'id' | 'created_at'>) => {
+    try {
+      const created = await createEvento({
+        nombre: form.nombre,
+        fecha_inicio: form.fecha_inicio,
+        fecha_fin: form.fecha_fin,
+        valor_minimo: form.valor_minimo,
+        valor_maximo: form.valor_maximo,
+        activo: form.activo ?? true,
+        categoria_ids: form.categoria_ids ?? [],
+        cupon_ids: form.cupon_ids ?? [],
+        entregable_ids: form.entregable_ids ?? [],
+      });
+      setEventos((prev) => [created, ...prev]);
+    } catch {
+      toast.error('Error al crear el evento');
+    }
   };
 
-  const handleEdit = (id: string | number, evento: Partial<EventoCampana>) => {
-    setEventos(
-      eventos.map((e) => {
-        if (e.id === Number(id)) {
-          const updated = { ...e, ...evento };
-          if (evento.categoriaIds) {
-            const categoriaNombres = categorias
-              .filter((c) => evento.categoriaIds?.includes(c.id))
-              .map((c) => c.nombre)
-              .join(', ');
-            updated.categoriaNombre = categoriaNombres;
-          }
-          if (evento.entregableId) {
-            const entregable = entregables.find((ent) => ent.id === evento.entregableId);
-            updated.entregableNombre = entregable?.nombre;
-          }
-          if (evento.cuponId) {
-            const cupon = cupones.find((c) => c.id === evento.cuponId);
-            updated.cuponNombre = cupon?.nombre;
-          }
-          return updated;
-        }
-        return e;
-      })
-    );
+  const handleEdit = async (id: string | number, form: Partial<EventoCampana>) => {
+    try {
+      const updated = await updateEvento(String(id), form);
+      setEventos((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+    } catch {
+      toast.error('Error al actualizar el evento');
+    }
   };
 
-  const handleDelete = (id: string | number) => {
-    setEventos(eventos.filter((e) => e.id !== Number(id)));
+  const handleDelete = async (id: string | number) => {
+    try {
+      await deleteEvento(String(id));
+      setEventos((prev) => prev.filter((e) => e.id !== String(id)));
+    } catch {
+      toast.error('Error al eliminar el evento');
+    }
   };
 
   const renderForm = (
     item: Partial<EventoCampana> | null,
     onChange: (field: keyof EventoCampana, value: any) => void
   ) => {
-    // Estado local para checkboxes, sincronizado con el CRUDTemplate
-    const [localCategorias, setLocalCategorias] = useState<number[]>(item?.categoriaIds || []);
-    // Sincroniza cambios hacia el CRUDTemplate
-    React.useEffect(() => {
-      setLocalCategorias(item?.categoriaIds || []);
-    }, [item?.categoriaIds]);
+    const [localCategorias, setLocalCategorias] = React.useState<string[]>(item?.categoria_ids ?? []);
+    const [localCupones, setLocalCupones] = React.useState<string[]>(item?.cupon_ids ?? []);
+    const [localEntregables, setLocalEntregables] = React.useState<string[]>(item?.entregable_ids ?? []);
 
-    const handleCategoriaChange = (id: number, checked: boolean) => {
-      let updated: number[];
-      if (checked) {
-        updated = [...localCategorias, id];
-      } else {
-        updated = localCategorias.filter((catId) => catId !== id);
-      }
+    React.useEffect(() => {
+      setLocalCategorias(item?.categoria_ids ?? []);
+      setLocalCupones(item?.cupon_ids ?? []);
+      setLocalEntregables(item?.entregable_ids ?? []);
+    }, [item?.id]);
+
+    const toggleCategoria = (id: string, checked: boolean) => {
+      const updated = checked ? [...localCategorias, id] : localCategorias.filter((x) => x !== id);
       setLocalCategorias(updated);
-      onChange('categoriaIds', updated);
+      onChange('categoria_ids', updated);
     };
-    const handleSelectAll = () => {
-      const allIds = categorias.filter((c) => c.activo).map((c) => c.id);
-      setLocalCategorias(allIds);
-      onChange('categoriaIds', allIds);
+    const toggleCupon = (id: string, checked: boolean) => {
+      const updated = checked ? [...localCupones, id] : localCupones.filter((x) => x !== id);
+      setLocalCupones(updated);
+      onChange('cupon_ids', updated);
     };
+    const toggleEntregable = (id: string, checked: boolean) => {
+      const updated = checked ? [...localEntregables, id] : localEntregables.filter((x) => x !== id);
+      setLocalEntregables(updated);
+      onChange('entregable_ids', updated);
+    };
+
     return (
       <form className="p-2 md:p-4">
         <div className="space-y-6 max-w-2xl mx-auto">
@@ -190,121 +109,136 @@ export function EventosCampanas() {
               placeholder="Nombre del evento o campaña"
             />
           </div>
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-lg p-6 border border-border transition-all">
+
+          {/* Categorías */}
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-lg p-6 border border-border">
             <div className="flex items-center justify-between mb-4">
-              <Label className="text-base font-semibold tracking-tight">Categorías participantes</Label>
-              <Button type="button" variant="secondary" size="sm" onClick={handleSelectAll}>
+              <Label className="text-base font-semibold">Categorías participantes</Label>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const all = categorias.filter((c) => c.activo).map((c) => c.id);
+                  setLocalCategorias(all);
+                  onChange('categoria_ids', all);
+                }}
+              >
                 Seleccionar todas
               </Button>
             </div>
-            <div className="max-h-64 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {categorias.filter((c) => c.activo).map((categoria) => (
-                <label
-                  key={categoria.id}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent/60 cursor-pointer transition-all group"
-                >
+            <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {categorias.filter((c) => c.activo).map((c) => (
+                <label key={c.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent/60 cursor-pointer">
                   <Checkbox
-                    checked={localCategorias.includes(categoria.id)}
-                    onCheckedChange={(checked) => handleCategoriaChange(categoria.id, !!checked)}
-                    className="transition-all group-hover:scale-110"
+                    checked={localCategorias.includes(c.id)}
+                    onCheckedChange={(checked) => toggleCategoria(c.id, !!checked)}
                   />
-                  <span className="text-sm font-medium select-none group-hover:text-primary transition-colors">
-                    {categoria.nombre}
-                  </span>
+                  <span className="text-sm font-medium">{c.nombre}</span>
                 </label>
               ))}
             </div>
           </div>
+
+          {/* Fechas */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="fechaInicio">Fecha Inicio</Label>
+              <Label htmlFor="fecha_inicio">Fecha Inicio</Label>
               <Input
-                id="fechaInicio"
+                id="fecha_inicio"
                 type="date"
-                defaultValue={item?.fechaInicio || ''}
-                onChange={(e) => onChange('fechaInicio', e.target.value)}
+                defaultValue={item?.fecha_inicio || ''}
+                onChange={(e) => onChange('fecha_inicio', e.target.value)}
               />
             </div>
             <div>
-              <Label htmlFor="fechaFin">Fecha Fin</Label>
+              <Label htmlFor="fecha_fin">Fecha Fin</Label>
               <Input
-                id="fechaFin"
+                id="fecha_fin"
                 type="date"
-                defaultValue={item?.fechaFin || ''}
-                onChange={(e) => onChange('fechaFin', e.target.value)}
+                defaultValue={item?.fecha_fin || ''}
+                onChange={(e) => onChange('fecha_fin', e.target.value)}
               />
             </div>
           </div>
+
+          {/* Valores */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="valorMinimo">Valor Mínimo de Participación</Label>
+              <Label htmlFor="valor_minimo">Valor Mínimo de Participación</Label>
               <Input
-                id="valorMinimo"
+                id="valor_minimo"
                 type="number"
                 step="0.01"
-                defaultValue={item?.valorMinimo || ''}
-                onChange={(e) => onChange('valorMinimo', parseFloat(e.target.value))}
+                defaultValue={item?.valor_minimo ?? ''}
+                onChange={(e) => onChange('valor_minimo', parseFloat(e.target.value))}
                 placeholder="0.00"
               />
             </div>
             <div>
-              <Label htmlFor="valorMaximo">Valor Máximo por Factura</Label>
+              <Label htmlFor="valor_maximo">Valor Máximo por Factura</Label>
               <Input
-                id="valorMaximo"
+                id="valor_maximo"
                 type="number"
                 step="0.01"
-                defaultValue={item?.valorMaximo || ''}
-                onChange={(e) => onChange('valorMaximo', parseFloat(e.target.value))}
+                defaultValue={item?.valor_maximo ?? ''}
+                onChange={(e) => onChange('valor_maximo', parseFloat(e.target.value))}
                 placeholder="0.00"
               />
             </div>
           </div>
-          <div>
-            <Label htmlFor="entregableId">Entregable</Label>
-            <Select
-              defaultValue={item?.entregableId?.toString()}
-              onValueChange={(value) => onChange('entregableId', parseInt(value))}
-            >
-              <SelectTrigger id="entregableId">
-                <SelectValue placeholder="Selecciona un entregable" />
-              </SelectTrigger>
-              <SelectContent>
-                {entregables
-                  .filter((e) => e.activo)
-                  .map((entregable) => (
-                    <SelectItem key={entregable.id} value={entregable.id.toString()}>
-                      {entregable.nombre}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+
+          {/* Activo */}
+          <div className="flex items-center gap-2">
+            <Switch
+              id="activo"
+              defaultChecked={item?.activo ?? true}
+              onCheckedChange={(checked) => onChange('activo', checked)}
+            />
+            <Label htmlFor="activo">Activo</Label>
           </div>
-          <div>
-            <Label htmlFor="cuponId">Cupón</Label>
-            <Select
-              defaultValue={item?.cuponId?.toString()}
-              onValueChange={(value) => onChange('cuponId', parseInt(value))}
-            >
-              <SelectTrigger id="cuponId">
-                <SelectValue placeholder="Selecciona un cupón" />
-              </SelectTrigger>
-              <SelectContent>
-                {cupones
-                  .filter((c) => c.activo)
-                  .map((cupon) => (
-                    <SelectItem key={cupon.id} value={cupon.id.toString()}>
-                      {cupon.nombre}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+
+          {/* Cupones */}
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-lg p-6 border border-border">
+            <Label className="text-base font-semibold mb-4 block">Cupones del evento</Label>
+            <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {cupones.filter((c) => c.activo).map((c) => (
+                <label key={c.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent/60 cursor-pointer">
+                  <Checkbox
+                    checked={localCupones.includes(c.id)}
+                    onCheckedChange={(checked) => toggleCupon(c.id, !!checked)}
+                  />
+                  <span className="text-sm font-medium">{c.nombre} (x{c.numero})</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Entregables */}
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-lg p-6 border border-border">
+            <Label className="text-base font-semibold mb-4 block">Entregables del evento</Label>
+            <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {entregables.filter((e) => e.activo).map((e) => (
+                <label key={e.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent/60 cursor-pointer">
+                  <Checkbox
+                    checked={localEntregables.includes(e.id)}
+                    onCheckedChange={(checked) => toggleEntregable(e.id, !!checked)}
+                  />
+                  <span className="text-sm font-medium">{e.nombre}</span>
+                </label>
+              ))}
+            </div>
           </div>
         </div>
       </form>
     );
   };
 
-// ...existing code...
+  const getCategoriaNames = (evento: EventoCampana) =>
+    evento.categoria_ids
+      .map((id) => categorias.find((c) => c.id === id)?.nombre)
+      .filter(Boolean)
+      .join(', ') || '—';
 
   return (
     <CRUDTemplate
@@ -313,26 +247,28 @@ export function EventosCampanas() {
       data={eventos}
       columns={[
         { key: 'nombre', label: 'Nombre' },
-        { key: 'fechaInicio', label: 'Fecha Inicio' },
-        { key: 'fechaFin', label: 'Fecha Fin' },
-        { key: 'categoriaNombre', label: 'Categorías' },
+        { key: 'fecha_inicio', label: 'Fecha Inicio' },
+        { key: 'fecha_fin', label: 'Fecha Fin' },
         {
-          key: 'valorMinimo',
+          key: 'categoria_ids',
+          label: 'Categorías',
+          render: (item) => getCategoriaNames(item),
+        },
+        {
+          key: 'valor_minimo',
           label: 'Valor Mínimo',
-          render: (item) => `$${item.valorMinimo.toFixed(2)}`,
+          render: (item) => `$${item.valor_minimo.toFixed(2)}`,
         },
         {
-          key: 'valorMaximo',
+          key: 'valor_maximo',
           label: 'Valor Máximo',
-          render: (item) => `$${item.valorMaximo.toFixed(2)}`,
+          render: (item) => `$${item.valor_maximo.toFixed(2)}`,
         },
-        { key: 'entregableNombre', label: 'Entregable' },
-        { key: 'cuponNombre', label: 'Cupón' },
       ]}
-      onAdd={handleAdd}
+      onAdd={handleAdd as any}
       onEdit={handleEdit}
       onDelete={handleDelete}
-      renderForm={renderForm}
+      renderForm={renderForm as any}
       getItemId={(item) => item.id}
     />
   );
