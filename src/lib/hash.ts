@@ -1,4 +1,5 @@
 export async function sha256(text: string): Promise<string> {
+  if (!text) throw new Error('sha256: input must not be empty');
   const encoder = new TextEncoder();
   const data = encoder.encode(text);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
