@@ -1,64 +1,64 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CRUDTemplate } from '@/app/components/CRUDTemplate';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Switch } from '@/app/components/ui/switch';
-
-interface MetodoPago {
-  id: number;
-  nombre: string;
-  descripcion: string;
-  activo: boolean;
-}
+import { toast } from 'sonner';
+import type { MetodoPago } from '@/lib/types';
+import { fetchMetodosPago, createMetodoPago, updateMetodoPago, deleteMetodoPago } from '@/lib/api/metodos-pago';
 
 export function MetodosPagoCRUD() {
-  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([
-    { id: 1, nombre: 'Tarjeta de Crédito', descripcion: 'Visa, Mastercard, Amex', activo: true },
-    { id: 2, nombre: 'PayPal', descripcion: 'Pago mediante PayPal', activo: true },
-    { id: 3, nombre: 'Transferencia Bancaria', descripcion: 'Transferencia directa', activo: false },
-  ]);
+  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
 
-  const handleAdd = (metodoPago: Omit<MetodoPago, 'id'>) => {
-    const newMetodoPago = { ...metodoPago, id: Date.now() };
-    setMetodosPago([...metodosPago, newMetodoPago]);
+  useEffect(() => {
+    fetchMetodosPago()
+      .then(setMetodosPago)
+      .catch(() => toast.error('Error al cargar métodos de pago'));
+  }, []);
+
+  const handleAdd = async (metodoPago: Omit<MetodoPago, 'id'>) => {
+    try {
+      const created = await createMetodoPago(metodoPago);
+      setMetodosPago((prev) => [...prev, created]);
+    } catch {
+      toast.error('Error al crear el método de pago');
+    }
   };
 
-  const handleEdit = (id: number, metodoPago: Partial<MetodoPago>) => {
-    setMetodosPago(metodosPago.map((m) => (m.id === id ? { ...m, ...metodoPago } : m)));
+  const handleEdit = async (id: string | number, metodoPago: Partial<MetodoPago>) => {
+    try {
+      const updated = await updateMetodoPago(String(id), metodoPago);
+      setMetodosPago((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    } catch {
+      toast.error('Error al actualizar el método de pago');
+    }
   };
 
-  const handleDelete = (id: number) => {
-    setMetodosPago(metodosPago.filter((m) => m.id !== id));
+  const handleDelete = async (id: string | number) => {
+    try {
+      await deleteMetodoPago(String(id));
+      setMetodosPago((prev) => prev.filter((m) => m.id !== String(id)));
+    } catch {
+      toast.error('Error al eliminar el método de pago');
+    }
   };
 
-  const renderForm = (item: Partial<MetodoPago> | null, onChange: (field: keyof MetodoPago, value: any) => void) => (
+  const renderForm = (
+    item: Partial<MetodoPago> | null,
+    onChange: (field: keyof MetodoPago, value: any) => void
+  ) => (
     <>
       <div>
         <Label htmlFor="nombre">Nombre</Label>
-        <Input
-          id="nombre"
-          defaultValue={item?.nombre || ''}
-          onChange={(e) => onChange('nombre', e.target.value)}
-          placeholder="Nombre del método de pago"
-        />
+        <Input id="nombre" defaultValue={item?.nombre || ''} onChange={(e) => onChange('nombre', e.target.value)} placeholder="Nombre del método de pago" />
       </div>
       <div>
         <Label htmlFor="descripcion">Descripción</Label>
-        <Textarea
-          id="descripcion"
-          defaultValue={item?.descripcion || ''}
-          onChange={(e) => onChange('descripcion', e.target.value)}
-          placeholder="Descripción del método de pago"
-          rows={3}
-        />
+        <Textarea id="descripcion" defaultValue={item?.descripcion || ''} onChange={(e) => onChange('descripcion', e.target.value)} placeholder="Descripción" rows={3} />
       </div>
       <div className="flex items-center gap-2">
-        <Switch
-          id="activo"
-          defaultChecked={item?.activo ?? true}
-          onCheckedChange={(checked) => onChange('activo', checked)}
-        />
+        <Switch id="activo" defaultChecked={item?.activo ?? true} onCheckedChange={(checked) => onChange('activo', checked)} />
         <Label htmlFor="activo">Activo</Label>
       </div>
     </>
@@ -73,16 +73,9 @@ export function MetodosPagoCRUD() {
         { key: 'nombre', label: 'Nombre' },
         { key: 'descripcion', label: 'Descripción' },
         {
-          key: 'activo',
-          label: 'Estado',
+          key: 'activo', label: 'Estado',
           render: (item) => (
-            <span
-              className={`px-2 py-1 rounded-full text-xs ${
-                item.activo
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-gray-100 text-gray-800'
-              }`}
-            >
+            <span className={`px-2 py-1 rounded-full text-xs ${item.activo ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
               {item.activo ? 'Activo' : 'Inactivo'}
             </span>
           ),
