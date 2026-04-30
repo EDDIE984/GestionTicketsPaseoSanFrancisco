@@ -18,7 +18,7 @@ cat > "$STAGE_DIR/Instalar.bat" <<'EOF'
 @echo off
 setlocal
 set "SCRIPT=%~dp0printer-connector\install-windows.ps1"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -LiteralPath '%SCRIPT%' -ErrorAction SilentlyContinue; & '%SCRIPT%'"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '%SCRIPT%' -ErrorAction SilentlyContinue; & '%SCRIPT%'"
 if errorlevel 1 (
   echo.
   echo No se pudo instalar la consola POS. Revisa el error anterior.
