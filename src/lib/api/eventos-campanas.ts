@@ -17,7 +17,14 @@ type RawEvento = {
 
 function mapRawEvento(raw: RawEvento): EventoCampana {
   return {
-    ...raw,
+    id: raw.id,
+    nombre: raw.nombre,
+    fecha_inicio: raw.fecha_inicio,
+    fecha_fin: raw.fecha_fin,
+    valor_minimo: raw.valor_minimo,
+    valor_maximo: raw.valor_maximo,
+    activo: raw.activo,
+    created_at: raw.created_at,
     categoria_ids: raw.evento_categorias.map((r) => r.categoria_id),
     cupon_ids: raw.evento_cupones.map((r) => r.cupon_id),
     entregable_ids: raw.evento_entregables.map((r) => r.entregable_id),

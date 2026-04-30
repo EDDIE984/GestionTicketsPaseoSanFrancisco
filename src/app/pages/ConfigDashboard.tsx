@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Users, Tag, Store, Ticket, Package, CreditCard, Calendar } from 'lucide-react';
+import { Users, Tag, Store, Ticket, Package, CreditCard, Calendar, SlidersHorizontal, Printer } from 'lucide-react';
 
 interface ConfigCardProps {
   title: string;
@@ -74,6 +74,18 @@ export function ConfigDashboard() {
       description: 'Administra eventos y campañas del sistema',
       icon: Calendar,
       path: '/configuracion/eventos-campanas',
+    },
+    {
+      title: 'Parametrizaciones',
+      description: 'Configura los datos para el envío de correo',
+      icon: SlidersHorizontal,
+      path: '/configuracion/parametrizaciones',
+    },
+    {
+      title: 'Impresora POS',
+      description: 'Consulta la consola local, cola y prueba la ticketera',
+      icon: Printer,
+      path: '/configuracion/impresora-pos',
     },
   ];
 

@@ -28,13 +28,23 @@ import {
 } from '@/app/components/ui/dialog';
 import { Badge } from '@/app/components/ui/badge';
 import { toast } from 'sonner';
-import { CheckCircle2, X, Printer, PlusCircle, FileStack } from 'lucide-react';
+import { CheckCircle2, X, Printer, PlusCircle, FileStack, LoaderCircle } from 'lucide-react';
 import { useAuth } from '@/app/components/AuthContext';
+import { consultarCedula } from '@/lib/api/cedula';
+import { enviarConsentimientoCliente } from '@/lib/api/consentimientos';
 import { upsertCliente } from '@/lib/api/clientes';
-import { createFactura, fetchFacturasDelDia, fetchEventosActivos } from '@/lib/api/facturas';
+import {
+  createFactura,
+  existsFacturaByNumero,
+  fetchFacturasDelDia,
+  fetchEventosActivos,
+  marcarFacturasComoImpresas,
+} from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
+import { checkPosPrinter, enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
+import logoUrl from '@/images/LogoPSFBlanco.svg';
 
 interface MetodoPagoLocal {
   id: string;
@@ -48,6 +58,7 @@ interface MetodoPagoLocal {
 
 interface FacturaPendiente {
   id: number;
+  facturaId?: string;
   eventoNombre: string;
   eventoId: string;
   eventoValorMinimo: number;
@@ -61,6 +72,7 @@ interface FacturaPendiente {
   numeroFactura: string;
   montoTotal: number;
   fechaEmision: string;
+  fechaRegistro?: string;
   metodosPago: MetodoPagoLocal[];
   totalEntregables: number;
   localId: string;
@@ -70,6 +82,8 @@ interface FacturaPendiente {
 interface EventoActivo {
   id: string;
   nombre: string;
+  fecha_inicio: string;
+  fecha_fin: string;
   valor_minimo: number;
   valor_maximo: number;
   activo: boolean;
@@ -99,12 +113,43 @@ export function Registro() {
   const [localesDisponibles, setLocalesDisponibles] = useState<LocalDisponible[]>([]);
   const [metodosPagoDisponibles, setMetodosPagoDisponibles] = useState<MetodoPagoDisponible[]>([]);
   const [facturas, setFacturas] = useState<FacturaVista[]>([]);
+  const [cargandoDatos, setCargandoDatos] = useState(true);
 
   useEffect(() => {
-    fetchEventosActivos().then(setEventosActivos).catch(() => toast.error('Error al cargar eventos'));
-    fetchLocales().then((data) => setLocalesDisponibles(data.filter((l) => l.activo))).catch(() => {});
-    fetchMetodosPago().then((data) => setMetodosPagoDisponibles(data.filter((m) => m.activo))).catch(() => {});
-    fetchFacturasDelDia().then(setFacturas).catch(() => toast.error('Error al cargar facturas'));
+    const cargarDatos = async () => {
+      setCargandoDatos(true);
+
+      const [eventosResult, localesResult, metodosPagoResult, facturasResult] = await Promise.allSettled([
+        fetchEventosActivos(),
+        fetchLocales(),
+        fetchMetodosPago(),
+        fetchFacturasDelDia(),
+      ]);
+
+      if (eventosResult.status === 'fulfilled') {
+        setEventosActivos(eventosResult.value);
+      } else {
+        toast.error('Error al cargar eventos');
+      }
+
+      if (localesResult.status === 'fulfilled') {
+        setLocalesDisponibles(localesResult.value.filter((l) => l.activo));
+      }
+
+      if (metodosPagoResult.status === 'fulfilled') {
+        setMetodosPagoDisponibles(metodosPagoResult.value.filter((m) => m.activo));
+      }
+
+      if (facturasResult.status === 'fulfilled') {
+        setFacturas(facturasResult.value);
+      } else {
+        toast.error('Error al cargar facturas');
+      }
+
+      setCargandoDatos(false);
+    };
+
+    cargarDatos();
   }, []);
 
   // Estado del cliente (persistente mientras se agregan facturas)
@@ -115,6 +160,11 @@ export function Registro() {
   const [telefono, setTelefono] = useState('');
   const [correo, setCorreo] = useState('');
   const [genero, setGenero] = useState('');
+  const [consultandoCedula, setConsultandoCedula] = useState(false);
+  const [ultimaCedulaConsultada, setUltimaCedulaConsultada] = useState('');
+  const [guardandoFacturas, setGuardandoFacturas] = useState(false);
+  const [validandoFactura, setValidandoFactura] = useState(false);
+  const [marcandoImpresion, setMarcandoImpresion] = useState(false);
   // Estado de la factura actual
   const [localId, setLocalId] = useState('');
   const [eventoId, setEventoId] = useState('');
@@ -136,9 +186,81 @@ export function Registro() {
   const [facturasPendientes, setFacturasPendientes] = useState<FacturaPendiente[]>([]);
   const [mostrarDialogoTickets, setMostrarDialogoTickets] = useState(false);
   const [facturasActuales, setFacturasActuales] = useState<FacturaPendiente[]>([]);
+  const [ticketsImpresos, setTicketsImpresos] = useState(false);
+
+  const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion;
+  const mensajeProceso = guardandoFacturas
+    ? 'Registrando facturas...'
+    : consultandoCedula
+      ? 'Consultando cédula...'
+      : validandoFactura
+        ? 'Validando factura...'
+        : marcandoImpresion
+          ? 'Marcando tickets como impresos...'
+          : 'Cargando información...';
 
   const calcularTotalMetodos = () => {
     return metodosPago.reduce((sum, m) => sum + m.monto, 0);
+  };
+
+  const totalMetodosCoincideConFactura = () => {
+    const totalFactura = parseFloat(montoTotal);
+    if (!Number.isFinite(totalFactura) || totalFactura <= 0) return false;
+    return Math.abs(calcularTotalMetodos() - totalFactura) <= 0.009;
+  };
+
+  const calcularSaldoPendiente = () => {
+    const totalFactura = parseFloat(montoTotal);
+    if (!Number.isFinite(totalFactura) || totalFactura <= 0) return 0;
+    return Math.max(totalFactura - calcularTotalMetodos(), 0);
+  };
+
+  useEffect(() => {
+    const saldoPendiente = calcularSaldoPendiente();
+    setMontoMetodo(saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '');
+  }, [montoTotal, metodosPago]);
+
+  useEffect(() => {
+    const cuponesEvento = eventosActivos.find((e) => e.id === eventoId)?.evento_cupones ?? [];
+    if (cuponesEvento.length === 1) {
+      setCuponSeleccionado(cuponesEvento[0].cupones.id);
+    } else if (!cuponesEvento.some((ec) => ec.cupones.id === cuponSeleccionado)) {
+      setCuponSeleccionado('');
+    }
+  }, [eventoId, eventosActivos, cuponSeleccionado]);
+
+  const validarEventoVigente = (evento?: EventoActivo) => {
+    if (!evento) return 'Debes seleccionar un evento válido';
+
+    const ahora = Date.now();
+    const inicio = new Date(evento.fecha_inicio).getTime();
+    const fin = new Date(evento.fecha_fin).getTime();
+
+    if (Number.isNaN(inicio) || Number.isNaN(fin)) {
+      return 'El evento seleccionado no tiene una vigencia válida';
+    }
+
+    if (ahora < inicio || ahora > fin) {
+      return 'El evento seleccionado no está vigente en este momento';
+    }
+
+    return null;
+  };
+
+  const validarMontoEvento = (evento: EventoActivo | undefined, monto: number) => {
+    const errorVigencia = validarEventoVigente(evento);
+    if (errorVigencia) return errorVigencia;
+    if (!evento) return 'Debes seleccionar un evento válido';
+
+    if (monto < evento.valor_minimo) {
+      return `El monto debe ser igual o mayor al valor mínimo del evento ($${evento.valor_minimo.toFixed(2)})`;
+    }
+
+    if (evento.valor_maximo > 0 && monto > evento.valor_maximo) {
+      return `El monto no puede superar el valor máximo por factura del evento ($${evento.valor_maximo.toFixed(2)})`;
+    }
+
+    return null;
   };
 
   const agregarMetodoPago = () => {
@@ -150,6 +272,10 @@ export function Registro() {
       toast.error('Debes seleccionar un evento primero');
       return;
     }
+    if (!cuponSeleccionado) {
+      toast.error('Selecciona un cupón');
+      return;
+    }
     const monto = parseFloat(montoMetodo);
     if (isNaN(monto) || monto <= 0) {
       toast.error('El monto debe ser mayor a 0');
@@ -157,6 +283,16 @@ export function Registro() {
     }
     const totalActual = calcularTotalMetodos();
     const montoTotalNum = parseFloat(montoTotal);
+    if (!Number.isFinite(montoTotalNum) || montoTotalNum <= 0) {
+      toast.error('Ingresa un monto total válido');
+      return;
+    }
+    const evento = eventosActivos.find((e) => e.id === eventoId);
+    const errorMontoEvento = validarMontoEvento(evento, montoTotalNum);
+    if (errorMontoEvento) {
+      toast.error(errorMontoEvento);
+      return;
+    }
     if (totalActual + monto > montoTotalNum) {
       toast.error('El total de los métodos de pago excede el monto de la factura');
       return;
@@ -167,7 +303,6 @@ export function Registro() {
     )?.nombre || '';
 
     // Obtener datos del evento
-    const evento = eventosActivos.find((e) => e.id === eventoId);
     const valorMinimo = evento?.valor_minimo || 1;
 
     // Obtener número del cupón (multiplicador)
@@ -175,16 +310,15 @@ export function Registro() {
     let cuponNombre: string | undefined = undefined;
     let cuponId: string | undefined = undefined;
 
-    // Solo si hay un cupón seleccionado Y no es "none"
-    if (cuponSeleccionado && cuponSeleccionado !== 'none' && cuponSeleccionado !== '') {
-      const eventoCupones = eventosActivos.find((e) => e.id === eventoId)?.evento_cupones ?? [];
-      const cupon = eventoCupones.find((ec) => ec.cupones.id === cuponSeleccionado)?.cupones;
-      if (cupon) {
-        cuponNumero = cupon.numero;
-        cuponNombre = cupon.nombre;
-        cuponId = cupon.id;
-      }
+    const eventoCupones = eventosActivos.find((e) => e.id === eventoId)?.evento_cupones ?? [];
+    const cupon = eventoCupones.find((ec) => ec.cupones.id === cuponSeleccionado)?.cupones;
+    if (!cupon) {
+      toast.error('Selecciona un cupón válido');
+      return;
     }
+    cuponNumero = cupon.numero;
+    cuponNombre = cupon.nombre;
+    cuponId = cupon.id;
 
     // Calcular entregables: Math.floor(monto_método / valor_mínimo_campaña) × multiplicador_cupón
     const entregablesBase = Math.floor(monto / valorMinimo);
@@ -204,7 +338,6 @@ export function Registro() {
     ]);
 
     setMetodoSeleccionado('');
-    setMontoMetodo('');
     setCuponSeleccionado('');
   };
 
@@ -232,12 +365,92 @@ export function Registro() {
     setTelefono('');
     setCorreo('');
     setGenero('');
+    setUltimaCedulaConsultada('');
     setEventoId('');
     limpiarFactura();
   };
 
+  const separarNombreCompleto = (nombreCompleto?: string) => {
+    const partes = (nombreCompleto ?? '').trim().split(/\s+/).filter(Boolean);
+    if (partes.length <= 2) {
+      return { apellidos: '', nombres: partes.join(' ') };
+    }
+
+    return {
+      apellidos: partes.slice(0, 2).join(' '),
+      nombres: partes.slice(2).join(' '),
+    };
+  };
+
+  const normalizarGenero = (valor?: string) => {
+    const generoApi = (valor ?? '').trim().toLowerCase();
+    if (['hombre', 'masculino', 'm'].includes(generoApi)) return 'masculino';
+    if (['mujer', 'femenino', 'f'].includes(generoApi)) return 'femenino';
+    return '';
+  };
+
+  const construirDireccion = (...partes: Array<string | undefined>) => {
+    return partes
+      .map((parte) => parte?.trim())
+      .filter((parte): parte is string => Boolean(parte && parte !== '00'))
+      .join(', ');
+  };
+
+  const consultarDatosCedula = async () => {
+    const cedulaLimpia = cedula.trim();
+    if (!cedulaLimpia || cedulaLimpia === ultimaCedulaConsultada) return;
+
+    setConsultandoCedula(true);
+    try {
+      const datos = await consultarCedula(cedulaLimpia);
+      if (!datos?.cedula && !datos?.nombre) {
+        toast.error('No se encontró información para la cédula ingresada');
+        return;
+      }
+
+      const { nombres, apellidos } = separarNombreCompleto(datos.nombre);
+      const direccionApi = construirDireccion(
+        datos.lugarDomicilio,
+        datos.calleDomicilio,
+        datos.numeracionDomicilio
+      );
+      const generoApi = normalizarGenero(datos.genero);
+
+      setCedula(datos.cedula ?? cedulaLimpia);
+      setNombre(nombres);
+      setApellido(apellidos);
+      if (direccionApi) setDireccion(direccionApi);
+      if (generoApi) setGenero(generoApi);
+      setUltimaCedulaConsultada(cedulaLimpia);
+      toast.success('Datos de cédula cargados');
+    } catch {
+      toast.error('No se pudo consultar la cédula');
+    } finally {
+      setConsultandoCedula(false);
+    }
+  };
+
   // Agregar factura a la lista temporal
-  const agregarFacturaPendiente = () => {
+  const validarNumeroFacturaDisponible = async (numero: string) => {
+    const numeroLimpio = numero.trim();
+    if (!numeroLimpio) return 'Ingresa el número de factura';
+
+    const duplicadaPendiente = facturasPendientes.some(
+      (factura) => factura.numeroFactura.trim() === numeroLimpio
+    );
+    if (duplicadaPendiente) {
+      return `La factura ${numeroLimpio} ya está en la lista pendiente`;
+    }
+
+    const existeEnBase = await existsFacturaByNumero(numeroLimpio);
+    if (existeEnBase) {
+      return `La factura ${numeroLimpio} ya fue registrada y ya emitió cupones`;
+    }
+
+    return null;
+  };
+
+  const agregarFacturaPendiente = async () => {
     // Validar campos vacíos
     const campos = [eventoId, localId, cedula, nombre, apellido, direccion, telefono, correo, genero, numeroFactura, montoTotal, fechaEmision];
     if (campos.some((c) => !c || c.trim() === '')) {
@@ -248,13 +461,38 @@ export function Registro() {
       toast.error('Debe agregar al menos un método de pago');
       return;
     }
+
+    setValidandoFactura(true);
+    try {
+      const errorNumeroFactura = await validarNumeroFacturaDisponible(numeroFactura);
+      if (errorNumeroFactura) {
+        toast.error(errorNumeroFactura);
+        return;
+      }
+    } catch {
+      toast.error('No se pudo validar si la factura ya existe');
+      return;
+    } finally {
+      setValidandoFactura(false);
+    }
+
     const totalMetodos = calcularTotalMetodos();
     const montoTotalNum = parseFloat(montoTotal);
-    if (totalMetodos !== montoTotalNum) {
-      toast.error(`El total de los métodos de pago ($${totalMetodos.toFixed(2)}) debe ser igual al monto total de la factura ($${montoTotalNum.toFixed(2)})`);
+    if (!Number.isFinite(montoTotalNum) || montoTotalNum <= 0) {
+      toast.error('Ingresa un monto total válido');
       return;
     }
     const eventoSeleccionado = eventosActivos.find((e) => e.id === eventoId);
+    const errorMontoEvento = validarMontoEvento(eventoSeleccionado, montoTotalNum);
+    if (errorMontoEvento) {
+      toast.error(errorMontoEvento);
+      return;
+    }
+
+    if (Math.abs(totalMetodos - montoTotalNum) > 0.009) {
+      toast.error(`El total de los métodos de pago ($${totalMetodos.toFixed(2)}) debe ser igual al monto total de la factura ($${montoTotalNum.toFixed(2)})`);
+      return;
+    }
     const eventoNombre = eventoSeleccionado?.nombre || '';
     const eventoValorMinimo = eventoSeleccionado?.valor_minimo || 0;
     const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
@@ -272,7 +510,7 @@ export function Registro() {
       telefono,
       correo,
       genero,
-      numeroFactura,
+      numeroFactura: numeroFactura.trim(),
       montoTotal: montoTotalNum,
       fechaEmision,
       metodosPago: [...metodosPago],
@@ -293,7 +531,25 @@ export function Registro() {
       return;
     }
 
+    setGuardandoFacturas(true);
     try {
+      const numeros = facturasPendientes.map((factura) => factura.numeroFactura.trim());
+      const numeroDuplicado = numeros.find((numero, index) => numeros.indexOf(numero) !== index);
+      if (numeroDuplicado) {
+        toast.error(`La factura ${numeroDuplicado} está repetida en la lista pendiente`);
+        return;
+      }
+
+      for (const numero of numeros) {
+        if (await existsFacturaByNumero(numero)) {
+          toast.error(`La factura ${numero} ya fue registrada y ya emitió cupones`);
+          return;
+        }
+      }
+
+      const consentimientosPendientes = new Map<string, string[]>();
+      const facturasRegistradas: FacturaPendiente[] = [];
+
       for (const fp of facturasPendientes) {
         // 1. Upsert cliente
         const cliente = await upsertCliente({
@@ -307,7 +563,7 @@ export function Registro() {
         });
 
         // 2. Crear factura
-        await createFactura(
+        const factura = await createFactura(
           {
             evento_id: fp.eventoId,
             cliente_id: cliente.id,
@@ -326,18 +582,43 @@ export function Registro() {
             entregables_calculados: m.entregablesCalculados ?? 0,
           }))
         );
+
+        const facturaIds = consentimientosPendientes.get(cliente.id) ?? [];
+        facturaIds.push(factura.id);
+        consentimientosPendientes.set(cliente.id, facturaIds);
+        facturasRegistradas.push({
+          ...fp,
+          facturaId: factura.id,
+          fechaRegistro: factura.fecha_registro,
+        });
+      }
+
+      for (const [clienteId, facturaIds] of consentimientosPendientes.entries()) {
+        try {
+          const result = await enviarConsentimientoCliente(clienteId, facturaIds);
+          if (result.skipped) {
+            toast.info('El cliente ya aceptó la política de protección de datos');
+          }
+        } catch {
+          toast.error('Las facturas se registraron, pero no se pudo enviar el correo de consentimiento');
+        }
       }
 
       // Recargar facturas del día
       const actualizadas = await fetchFacturasDelDia();
       setFacturas(actualizadas);
 
-      setFacturasActuales(facturasPendientes);
+      setFacturasActuales(facturasRegistradas);
       setFacturasPendientes([]);
       setMostrarDialogoTickets(true);
+      setTicketsImpresos(false);
       limpiarCliente();
-    } catch {
-      toast.error('Error al registrar las facturas');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const esDuplicada = message.includes('duplicate') || message.includes('facturas_numero_factura_key');
+      toast.error(esDuplicada ? 'Una de las facturas ya fue registrada previamente' : 'Error al registrar las facturas');
+    } finally {
+      setGuardandoFacturas(false);
     }
   };
 
@@ -349,15 +630,67 @@ export function Registro() {
     return oculto + visible;
   };
 
+  const formatearFechaHoraRegistro = (value?: string) => {
+    const date = value ? new Date(value) : new Date();
+    return date.toLocaleString('es-EC', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  };
+
   // Función para generar número de ticket único
-  const generarNumeroTicket = (facturaId: number, indice: number) => {
-    const base = facturaId % 10000;
-    return base + indice;
+  const generarNumeroTicket = (factura: FacturaPendiente, indice: number) => {
+    return `${factura.numeroFactura}-${String(indice + 1).padStart(4, '0')}`;
+  };
+
+  const construirTicketsPos = (): PosTicket[] => {
+    return facturasActuales.flatMap((facturaActual) =>
+      Array.from({ length: facturaActual.totalEntregables }).map((_, index) => ({
+        ticketNumero: generarNumeroTicket(facturaActual, index),
+        cedula: ocultarCedula(facturaActual.cedula),
+        nombre: `${facturaActual.nombre} ${facturaActual.apellido}`.trim(),
+        telefono: facturaActual.telefono,
+        fechaHora: formatearFechaHoraRegistro(facturaActual.fechaRegistro),
+        local: facturaActual.localNombre || '—',
+      }))
+    );
   };
 
   // Función para imprimir tickets
-  const imprimirTickets = () => {
-    window.print();
+  const imprimirTickets = async () => {
+    if (ticketsImpresos) return;
+
+    const facturaIds = facturasActuales
+      .map((factura) => factura.facturaId)
+      .filter((id): id is string => Boolean(id));
+
+    if (facturaIds.length !== facturasActuales.length) {
+      toast.error('No se pudo identificar todas las facturas para marcar la impresión');
+      return;
+    }
+
+    setMarcandoImpresion(true);
+    try {
+      await checkPosPrinter();
+      const tickets = construirTicketsPos();
+      const job = await enviarTicketsACola(tickets);
+      toast.info(`Impresión enviada a la cola. Esperando confirmación (${job.totalTickets} tickets)...`);
+      await esperarTrabajoImpresion(job.jobId);
+      await marcarFacturasComoImpresas(facturaIds);
+      setTicketsImpresos(true);
+      const actualizadas = await fetchFacturasDelDia();
+      setFacturas(actualizadas);
+      toast.success(`Tickets impresos correctamente (${job.totalTickets})`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo enviar los tickets a impresión');
+    } finally {
+      setMarcandoImpresion(false);
+    }
   };
 
   // Facturas del día vienen de Supabase (ya filtradas por fecha)
@@ -365,6 +698,22 @@ export function Registro() {
 
   return (
     <div className="p-8">
+      {procesando && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/60 backdrop-blur-[2px]">
+          <div className="absolute left-0 right-0 top-0 h-1 overflow-hidden bg-slate-200">
+            <div className="h-full w-1/3 animate-[pulse_1.1s_ease-in-out_infinite] bg-blue-600" />
+          </div>
+          <div
+            className="flex min-w-64 items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-lg"
+            role="status"
+            aria-live="polite"
+          >
+            <LoaderCircle className="h-6 w-6 animate-spin text-blue-600" />
+            <span className="text-sm font-medium text-slate-800">{mensajeProceso}</span>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6">
         <h1 className="text-3xl mb-2">Registro de Facturas</h1>
         <p className="text-gray-600">Registra facturas de eventos y campañas</p>
@@ -406,7 +755,9 @@ export function Registro() {
                     id="cedula"
                     value={cedula}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCedula(e.target.value)}
+                    onBlur={consultarDatosCedula}
                     placeholder="Número de cédula"
+                    disabled={consultandoCedula}
                   />
                 </div>
 
@@ -563,7 +914,7 @@ export function Registro() {
                   </div>
 
                   <div>
-                    <Label htmlFor="cuponMetodo">Cupón (Opcional)</Label>
+                    <Label htmlFor="cuponMetodo">Cupón *</Label>
                     <Select
                       value={cuponSeleccionado}
                       onValueChange={setCuponSeleccionado}
@@ -573,7 +924,6 @@ export function Registro() {
                         <SelectValue placeholder={eventoId ? "Selecciona cupón" : "Selecciona evento primero"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Sin cupón</SelectItem>
                         {eventoId &&
                           eventosActivos
                             .find((e) => e.id === eventoId)
@@ -587,7 +937,11 @@ export function Registro() {
                   </div>
 
                   <div className="flex items-end">
-                    <Button onClick={agregarMetodoPago} type="button" className="w-full">
+                    <Button
+                      onClick={agregarMetodoPago}
+                      type="button"
+                      className="w-full bg-black text-white hover:bg-gray-900"
+                    >
                       <PlusCircle className="w-5 h-5 mr-2" />
                       Método
                     </Button>
@@ -627,7 +981,7 @@ export function Registro() {
                     <div className="mt-4 pt-4 border-t space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="font-semibold">Total Métodos de Pago:</span>
-                        <span className={`text-lg font-bold ${calcularTotalMetodos() === parseFloat(montoTotal || '0') ? 'text-green-600' : 'text-red-600'}`}>
+                        <span className={`text-lg font-bold ${totalMetodosCoincideConFactura() ? 'text-green-600' : 'text-red-600'}`}>
                           ${calcularTotalMetodos().toFixed(2)}
                         </span>
                       </div>
@@ -638,12 +992,27 @@ export function Registro() {
                         </span>
                       </div>
                     </div>
-                    {montoTotal && calcularTotalMetodos() === parseFloat(montoTotal) && (
-                      <div className="mt-2 flex items-center gap-2 text-green-600">
-                        <CheckCircle2 className="w-5 h-5" />
-                        <span>El total coincide con el monto de la factura</span>
+
+                    <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      {totalMetodosCoincideConFactura() ? (
+                        <div className="flex items-center gap-2 text-green-600">
+                          <CheckCircle2 className="w-5 h-5" />
+                          <span>El total coincide con el monto de la factura</span>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500">
+                          Agrega métodos de pago hasta completar el monto de la factura.
+                        </div>
+                      )}
+                      <Button
+                        onClick={agregarFacturaPendiente}
+                        disabled={procesando || !totalMetodosCoincideConFactura()}
+                        className="bg-black text-white hover:bg-gray-900 sm:min-w-36"
+                      >
+                        <PlusCircle className="w-5 h-5 mr-2" />
+                        {validandoFactura ? 'Validando...' : 'Agregar'}
+                      </Button>
                       </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -701,13 +1070,13 @@ export function Registro() {
                 </div>
               )}
               <div className="flex justify-end gap-4 pt-4 border-t">
-                <Button onClick={agregarFacturaPendiente}>
-                  <PlusCircle className="w-5 h-5 mr-2" />
-                  Factura
-                </Button>
-                <Button onClick={registrarFacturas} variant="default" disabled={facturasPendientes.length === 0}>
-                  <FileStack className="w-5 h-5 mr-2" />
-                  Registrar facturas
+                <Button onClick={registrarFacturas} variant="default" disabled={facturasPendientes.length === 0 || procesando}>
+                  {guardandoFacturas ? (
+                    <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
+                  ) : (
+                    <FileStack className="w-5 h-5 mr-2" />
+                  )}
+                  {guardandoFacturas ? 'Registrando...' : 'Registrar facturas'}
                 </Button>
               </div>
             </CardContent>
@@ -841,54 +1210,50 @@ export function Registro() {
                         <h3 className="font-semibold mb-4">Tickets de Entrega</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                           {Array.from({ length: facturaActual.totalEntregables }).map((_, index) => {
-                            const numeroTicket = generarNumeroTicket(facturaActual.id, index);
-                            const [year, month, day] = facturaActual.fechaEmision.split('-');
-                            const fechaFormato = `${day}/${month}/${year}`;
-                            const horaActual = new Date();
-                            const horaFormato = horaActual.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                            const numeroTicket = generarNumeroTicket(facturaActual, index);
+                            const fechaHoraRegistro = formatearFechaHoraRegistro(facturaActual.fechaRegistro);
                             return (
                               <div
                                 key={index}
-                                className="border-2 border-gray-300 rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow print:break-inside-avoid"
+                                className="border-2 border-gray-300 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow print:break-inside-avoid overflow-hidden"
                               >
-                                <div className="text-center mb-3 border-b pb-3">
-                                  <h2 className="text-base font-bold mb-1 text-gray-700 uppercase leading-tight">
-                                    {facturaActual.eventoNombre}
-                                  </h2>
-                                  <p className="text-xs text-gray-500">Ticket de Entrega</p>
+                                <div className="bg-slate-900 px-4 py-4 text-center">
+                                  <img src={logoUrl} alt="Paseo San Francisco" className="mx-auto h-12 max-w-44 object-contain" />
                                 </div>
-                                <div className="text-center mb-3 bg-gray-50 rounded py-2">
-                                  <p className="text-xs text-gray-600 mb-0.5">Ticket #:</p>
-                                  <p className="text-3xl font-bold text-gray-800">{numeroTicket}</p>
-                                </div>
-                                <div className="space-y-2.5 text-sm">
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-0.5">Cédula:</p>
-                                    <p className="font-semibold text-gray-800">{ocultarCedula(facturaActual.cedula)}</p>
+                                <div className="px-4 py-4">
+                                  <div className="mb-4 text-center">
+                                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Ticket #:</p>
+                                    <p className="text-3xl font-bold text-gray-900">{numeroTicket}</p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-0.5">Nombre:</p>
-                                    <p className="font-semibold text-gray-800 break-words leading-tight">
-                                      {facturaActual.nombre} {facturaActual.apellido}
-                                    </p>
+                                  <div className="space-y-2.5 text-sm">
+                                    <div>
+                                      <p className="text-xs text-gray-500">Cédula:</p>
+                                      <p className="font-semibold text-gray-900">{ocultarCedula(facturaActual.cedula)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Nombre:</p>
+                                      <p className="font-semibold text-gray-900 break-words leading-tight">
+                                        {facturaActual.nombre} {facturaActual.apellido}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Teléfono:</p>
+                                      <p className="font-semibold text-gray-900">{facturaActual.telefono}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Fecha y hora registro:</p>
+                                      <p className="font-semibold text-gray-900">{fechaHoraRegistro}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Local comercial:</p>
+                                      <p className="font-semibold text-gray-900">{facturaActual.localNombre || '—'}</p>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-0.5">Teléfono:</p>
-                                    <p className="font-semibold text-gray-800">{facturaActual.telefono}</p>
+                                  <div className="mt-4 border-t pt-3 text-center">
+                                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300">
+                                      Ticket {index + 1} de {facturaActual.totalEntregables}
+                                    </Badge>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-0.5">Fecha:</p>
-                                    <p className="font-semibold text-gray-800">{fechaFormato}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-0.5">Hora:</p>
-                                    <p className="font-semibold text-gray-800">{horaFormato}</p>
-                                  </div>
-                                </div>
-                                <div className="mt-3 pt-3 border-t text-center">
-                                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300">
-                                    Ticket {index + 1} de {facturaActual.totalEntregables}
-                                  </Badge>
                                 </div>
                               </div>
                             );
@@ -903,9 +1268,18 @@ export function Registro() {
                 <Button variant="outline" onClick={() => setMostrarDialogoTickets(false)} size="lg">
                   Cerrar
                 </Button>
-                <Button onClick={imprimirTickets} size="lg" className="bg-blue-600 hover:bg-blue-700">
-                  <Printer className="w-5 h-5 mr-2" />
-                  Imprimir todos los tickets
+                <Button
+                  onClick={imprimirTickets}
+                  size="lg"
+                  className="bg-blue-600 hover:bg-blue-700"
+                  disabled={ticketsImpresos || marcandoImpresion}
+                >
+                  {marcandoImpresion ? (
+                    <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
+                  ) : (
+                    <Printer className="w-5 h-5 mr-2" />
+                  )}
+                  {ticketsImpresos ? 'Tickets impresos' : marcandoImpresion ? 'Marcando...' : 'Imprimir todos los tickets'}
                 </Button>
               </div>
             </>

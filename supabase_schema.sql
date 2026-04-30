@@ -69,6 +69,21 @@ CREATE TABLE entregables (
   activo      BOOLEAN NOT NULL DEFAULT true
 );
 
+CREATE TABLE parametrizaciones_correo (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  nombre_remitente  TEXT NOT NULL,
+  correo_remitente  TEXT NOT NULL,
+  host_smtp         TEXT NOT NULL,
+  puerto_smtp       INTEGER NOT NULL DEFAULT 587,
+  usuario_smtp      TEXT NOT NULL,
+  password_smtp     TEXT NOT NULL,
+  seguridad         TEXT NOT NULL DEFAULT 'tls' CHECK (seguridad IN ('none', 'tls', 'ssl')),
+  responder_a       TEXT,
+  asunto_prueba     TEXT,
+  activo            BOOLEAN NOT NULL DEFAULT true,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 
 -- ============================================================
 -- EVENTOS Y CAMPAÑAS
@@ -77,8 +92,8 @@ CREATE TABLE entregables (
 CREATE TABLE eventos_campanas (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   nombre       TEXT NOT NULL,
-  fecha_inicio DATE NOT NULL,
-  fecha_fin    DATE NOT NULL,
+  fecha_inicio TIMESTAMPTZ NOT NULL,
+  fecha_fin    TIMESTAMPTZ NOT NULL,
   valor_minimo NUMERIC(10,2) NOT NULL,
   valor_maximo NUMERIC(10,2) NOT NULL,
   activo       BOOLEAN NOT NULL DEFAULT true,
@@ -121,6 +136,8 @@ CREATE TABLE facturas (
   monto_total       NUMERIC(10,2) NOT NULL,
   fecha_emision     DATE NOT NULL,
   total_entregables INTEGER NOT NULL DEFAULT 0,
+  tickets_impresos  BOOLEAN NOT NULL DEFAULT false,
+  tickets_impresos_at TIMESTAMPTZ,
   fecha_registro    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -132,6 +149,27 @@ CREATE TABLE factura_metodos_pago (
   cupon_id               UUID REFERENCES cupones(id),  -- nullable, elegido por cajero
   cupon_numero           INTEGER,                       -- snapshot del multiplicador al registrar
   entregables_calculados INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE formularios_consentimiento (
+  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cliente_id               UUID NOT NULL UNIQUE REFERENCES clientes(id) ON DELETE CASCADE,
+  factura_ids              UUID[] NOT NULL DEFAULT '{}',
+  cedula                   TEXT NOT NULL,
+  nombre                   TEXT NOT NULL,
+  correo                   TEXT NOT NULL,
+  telefono                 TEXT,
+  token                    TEXT UNIQUE NOT NULL,
+  token_expira_at          TIMESTAMPTZ NOT NULL,
+  correo_enviado_at        TIMESTAMPTZ,
+  formulario_enviado_at    TIMESTAMPTZ,
+  acepta_publicidad        BOOLEAN NOT NULL DEFAULT true,
+  acepta_proteccion_datos  BOOLEAN NOT NULL DEFAULT false,
+  fecha_aceptacion         TIMESTAMPTZ,
+  ip                       TEXT,
+  user_agent               TEXT,
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 
@@ -146,3 +184,6 @@ CREATE INDEX idx_facturas_local_id     ON facturas(local_id);
 CREATE INDEX idx_facturas_fecha_emision ON facturas(fecha_emision);
 CREATE INDEX idx_fmp_factura_id        ON factura_metodos_pago(factura_id);
 CREATE INDEX idx_clientes_cedula       ON clientes(cedula);
+CREATE INDEX idx_eventos_campanas_vigencia ON eventos_campanas(fecha_inicio, fecha_fin);
+CREATE INDEX idx_formularios_consentimiento_token ON formularios_consentimiento(token);
+CREATE INDEX idx_formularios_consentimiento_cliente_id ON formularios_consentimiento(cliente_id);

@@ -17,6 +17,75 @@ import { fetchCategorias } from '@/lib/api/categorias';
 import { fetchCupones } from '@/lib/api/cupones';
 import { fetchEntregables } from '@/lib/api/entregables';
 
+const toDateTimeInputValue = (value?: string) => {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T00:00`;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
+
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 16);
+};
+
+const toTimestampValue = (value?: string) => {
+  if (!value) return '';
+  return new Date(value).toISOString();
+};
+
+const toNumberInputValue = (value?: number) => {
+  return Number.isFinite(value) ? String(value) : '';
+};
+
+const toNumberValue = (value: string) => {
+  if (value.trim() === '') return 0;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const formatFechaHora = (value: string) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat('es-EC', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    hour12: false,
+  }).format(date);
+};
+
+const validarEvento = (form: Partial<EventoCampana>) => {
+  if (!form.nombre?.trim()) return 'Ingresa el nombre del evento o campaña';
+  if (!form.fecha_inicio) return 'Ingresa la fecha y hora de inicio';
+  if (!form.fecha_fin) return 'Ingresa la fecha y hora de fin';
+  const inicio = new Date(form.fecha_inicio).getTime();
+  const fin = new Date(form.fecha_fin).getTime();
+  if (Number.isNaN(inicio) || Number.isNaN(fin)) return 'Ingresa fechas y horas válidas';
+  if (inicio >= fin) {
+    return 'La fecha y hora de inicio debe ser menor a la fecha y hora de fin';
+  }
+  if (!Number.isFinite(form.valor_minimo)) return 'Ingresa un valor mínimo válido';
+  if (!Number.isFinite(form.valor_maximo)) return 'Ingresa un valor máximo válido';
+  if ((form.valor_minimo ?? 0) <= 0) return 'El valor mínimo debe ser mayor a 0';
+  if ((form.valor_maximo ?? 0) < 0) return 'El valor máximo no puede ser negativo';
+  if ((form.valor_maximo ?? 0) > 0 && (form.valor_minimo ?? 0) > (form.valor_maximo ?? 0)) {
+    return 'El valor mínimo no puede ser mayor que el valor máximo';
+  }
+  return null;
+};
+
+const getErrorMessage = (error: unknown) => {
+  if (error && typeof error === 'object') {
+    const maybeError = error as { message?: string; details?: string; hint?: string; code?: string };
+    return [maybeError.message, maybeError.details, maybeError.hint, maybeError.code && `Código: ${maybeError.code}`]
+      .filter(Boolean)
+      .join(' | ');
+  }
+
+  return '';
+};
+
 export function EventosCampanas() {
   const [eventos, setEventos] = useState<EventoCampana[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -31,30 +100,57 @@ export function EventosCampanas() {
   }, []);
 
   const handleAdd = async (form: Omit<EventoCampana, 'id' | 'created_at'>) => {
+    const normalizedForm = {
+      ...form,
+      valor_minimo: Number.isFinite(form.valor_minimo) ? form.valor_minimo : 0,
+      valor_maximo: Number.isFinite(form.valor_maximo) ? form.valor_maximo : 0,
+      activo: form.activo ?? true,
+      categoria_ids: form.categoria_ids ?? [],
+      cupon_ids: form.cupon_ids ?? [],
+      entregable_ids: form.entregable_ids ?? [],
+    };
+    const errorValidacion = validarEvento(normalizedForm);
+    if (errorValidacion) {
+      toast.error(errorValidacion);
+      return;
+    }
+
     try {
       const created = await createEvento({
-        nombre: form.nombre,
-        fecha_inicio: form.fecha_inicio,
-        fecha_fin: form.fecha_fin,
-        valor_minimo: form.valor_minimo,
-        valor_maximo: form.valor_maximo,
-        activo: form.activo ?? true,
-        categoria_ids: form.categoria_ids ?? [],
-        cupon_ids: form.cupon_ids ?? [],
-        entregable_ids: form.entregable_ids ?? [],
+        nombre: normalizedForm.nombre,
+        fecha_inicio: normalizedForm.fecha_inicio,
+        fecha_fin: normalizedForm.fecha_fin,
+        valor_minimo: normalizedForm.valor_minimo,
+        valor_maximo: normalizedForm.valor_maximo,
+        activo: normalizedForm.activo,
+        categoria_ids: normalizedForm.categoria_ids,
+        cupon_ids: normalizedForm.cupon_ids,
+        entregable_ids: normalizedForm.entregable_ids,
       });
       setEventos((prev) => [created, ...prev]);
-    } catch {
-      toast.error('Error al crear el evento');
+    } catch (error) {
+      toast.error('Error al crear el evento', {
+        description: getErrorMessage(error),
+        duration: 10000,
+      });
     }
   };
 
   const handleEdit = async (id: string | number, form: Partial<EventoCampana>) => {
+    const errorValidacion = validarEvento(form);
+    if (errorValidacion) {
+      toast.error(errorValidacion);
+      return;
+    }
+
     try {
       const updated = await updateEvento(String(id), form);
       setEventos((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
-    } catch {
-      toast.error('Error al actualizar el evento');
+    } catch (error) {
+      toast.error('Error al actualizar el evento', {
+        description: getErrorMessage(error),
+        duration: 10000,
+      });
     }
   };
 
@@ -79,6 +175,12 @@ export function EventosCampanas() {
       setLocalCategorias(item?.categoria_ids ?? []);
       setLocalCupones(item?.cupon_ids ?? []);
       setLocalEntregables(item?.entregable_ids ?? []);
+    }, [item?.id]);
+
+    React.useEffect(() => {
+      onChange('valor_minimo', item?.valor_minimo ?? 0);
+      onChange('valor_maximo', item?.valor_maximo ?? 0);
+      onChange('activo', item?.activo ?? true);
     }, [item?.id]);
 
     const toggleCategoria = (id: string, checked: boolean) => {
@@ -141,23 +243,25 @@ export function EventosCampanas() {
           </div>
 
           {/* Fechas */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
-              <Label htmlFor="fecha_inicio">Fecha Inicio</Label>
+              <Label htmlFor="fecha_inicio">Fecha y Hora Inicio</Label>
               <Input
                 id="fecha_inicio"
-                type="date"
-                defaultValue={item?.fecha_inicio || ''}
-                onChange={(e) => onChange('fecha_inicio', e.target.value)}
+                type="datetime-local"
+                defaultValue={toDateTimeInputValue(item?.fecha_inicio)}
+                onChange={(e) => onChange('fecha_inicio', toTimestampValue(e.target.value))}
+                className="h-11 min-w-0 pr-4 text-sm"
               />
             </div>
             <div>
-              <Label htmlFor="fecha_fin">Fecha Fin</Label>
+              <Label htmlFor="fecha_fin">Fecha y Hora Fin</Label>
               <Input
                 id="fecha_fin"
-                type="date"
-                defaultValue={item?.fecha_fin || ''}
-                onChange={(e) => onChange('fecha_fin', e.target.value)}
+                type="datetime-local"
+                defaultValue={toDateTimeInputValue(item?.fecha_fin)}
+                onChange={(e) => onChange('fecha_fin', toTimestampValue(e.target.value))}
+                className="h-11 min-w-0 pr-4 text-sm"
               />
             </div>
           </div>
@@ -170,8 +274,8 @@ export function EventosCampanas() {
                 id="valor_minimo"
                 type="number"
                 step="0.01"
-                defaultValue={item?.valor_minimo ?? ''}
-                onChange={(e) => onChange('valor_minimo', parseFloat(e.target.value))}
+                defaultValue={toNumberInputValue(item?.valor_minimo)}
+                onChange={(e) => onChange('valor_minimo', toNumberValue(e.target.value))}
                 placeholder="0.00"
               />
             </div>
@@ -181,8 +285,8 @@ export function EventosCampanas() {
                 id="valor_maximo"
                 type="number"
                 step="0.01"
-                defaultValue={item?.valor_maximo ?? ''}
-                onChange={(e) => onChange('valor_maximo', parseFloat(e.target.value))}
+                defaultValue={toNumberInputValue(item?.valor_maximo)}
+                onChange={(e) => onChange('valor_maximo', toNumberValue(e.target.value))}
                 placeholder="0.00"
               />
             </div>
@@ -247,8 +351,16 @@ export function EventosCampanas() {
       data={eventos}
       columns={[
         { key: 'nombre', label: 'Nombre' },
-        { key: 'fecha_inicio', label: 'Fecha Inicio' },
-        { key: 'fecha_fin', label: 'Fecha Fin' },
+        {
+          key: 'fecha_inicio',
+          label: 'Inicio',
+          render: (item) => formatFechaHora(item.fecha_inicio),
+        },
+        {
+          key: 'fecha_fin',
+          label: 'Fin',
+          render: (item) => formatFechaHora(item.fecha_fin),
+        },
         {
           key: 'categoria_ids',
           label: 'Categorías',

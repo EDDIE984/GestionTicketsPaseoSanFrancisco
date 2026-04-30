@@ -1,0 +1,41 @@
+name: Build printer installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "printer-v*"
+
+jobs:
+  macos-dmg:
+    name: macOS DMG
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build DMG
+        run: sh scripts/make-printer-macos-dmg.sh
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: paseo-ticket-printer-mac
+          path: public/installers/paseo-ticket-printer-mac.dmg
+
+  windows-exe:
+    name: Windows EXE
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build EXE
+        shell: pwsh
+        run: ./scripts/make-printer-windows-exe.ps1
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: paseo-ticket-printer-windows
+          path: public/installers/paseo-ticket-printer-windows.exe

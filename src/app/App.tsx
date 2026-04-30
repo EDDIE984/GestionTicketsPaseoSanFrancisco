@@ -10,7 +10,11 @@ import { CuponesCRUD } from '@/app/pages/crud/CuponesCRUD';
 import { EntregablesCRUD } from '@/app/pages/crud/EntregablesCRUD';
 import { MetodosPagoCRUD } from '@/app/pages/crud/MetodosPagoCRUD';
 import { EventosCampanas } from '@/app/pages/EventosCampanas';
+import { Parametrizaciones } from '@/app/pages/Parametrizaciones';
+import { ImpresoraPOS } from '@/app/pages/ImpresoraPOS';
+import { ManualImpresoraPOS } from '@/app/pages/ManualImpresoraPOS';
 import { Registro } from '@/app/pages/Registro';
+import { Consentimiento } from '@/app/pages/Consentimiento';
 import { Reporteria } from '@/app/pages/Reporteria';
 import { Trafico } from '@/app/pages/Trafico';
 import { Login } from '@/app/pages/Login';
@@ -22,7 +26,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   if (!user) {
-    return <Login onLogin={login} />;
+    return (
+      <>
+        <GlobalToaster />
+        <BrowserRouter>
+          <Routes>
+            <Route path="consentimiento/:token" element={<Consentimiento />} />
+            <Route path="*" element={<Login onLogin={login} />} />
+          </Routes>
+        </BrowserRouter>
+      </>
+    );
   }
 
   // Rutas para admin
@@ -37,6 +51,9 @@ export default function App() {
       <Route path="configuracion/entregables" element={<EntregablesCRUD />} />
       <Route path="configuracion/metodos-pago" element={<MetodosPagoCRUD />} />
       <Route path="configuracion/eventos-campanas" element={<EventosCampanas />} />
+      <Route path="configuracion/parametrizaciones" element={<Parametrizaciones />} />
+      <Route path="configuracion/impresora-pos" element={<ImpresoraPOS />} />
+      <Route path="configuracion/impresora-pos/manual" element={<ManualImpresoraPOS />} />
       <Route path="registro" element={<Registro />} />
       <Route path="eventos" element={<Navigate to="/configuracion/eventos-campanas" replace />} />
       <Route path="reporteria" element={<Reporteria />} />
@@ -58,6 +75,7 @@ export default function App() {
       <GlobalToaster />
       <BrowserRouter>
         <Routes>
+          <Route path="consentimiento/:token" element={<Consentimiento />} />
           {user.rol === 'Admin' ? adminRoutes : userRoutes}
         </Routes>
       </BrowserRouter>

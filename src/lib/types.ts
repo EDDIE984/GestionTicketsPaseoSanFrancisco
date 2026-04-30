@@ -71,6 +71,21 @@ export interface EventoCampana {
   entregable_ids: string[];
 }
 
+export interface ParametrizacionCorreo {
+  id: string;
+  nombre_remitente: string;
+  correo_remitente: string;
+  host_smtp: string;
+  puerto_smtp: number;
+  usuario_smtp: string;
+  password_smtp: string;
+  seguridad: 'none' | 'tls' | 'ssl';
+  responder_a: string | null;
+  asunto_prueba: string | null;
+  activo: boolean;
+  updated_at: string;
+}
+
 export interface Factura {
   id: string;
   evento_id: string;
@@ -81,6 +96,8 @@ export interface Factura {
   monto_total: number;
   fecha_emision: string;
   total_entregables: number;
+  tickets_impresos: boolean;
+  tickets_impresos_at: string | null;
   fecha_registro: string;
 }
 

@@ -5,7 +5,16 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "dev:vercel": "vercel dev",
+    "test:correo": "node scripts/test-correo.js",
+    "printer:server": "node printer-connector/server.js",
+    "printer:epson": "PRINTER_MODE=system PRINTER_NAME=EPSON_TM_T20III node printer-connector/server.js",
+    "printer:install:mac": "sh printer-connector/install-macos-service.sh",
+    "printer:uninstall:mac": "sh printer-connector/uninstall-macos-service.sh",
+    "printer:test-load": "node scripts/test-printer-load.js",
+    "installer:mac": "sh scripts/make-printer-macos-dmg.sh",
+    "installer:windows": "powershell -ExecutionPolicy Bypass -File scripts/make-printer-windows-exe.ps1"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -49,6 +58,7 @@
     "lucide-react": "0.487.0",
     "motion": "12.23.24",
     "next-themes": "0.4.6",
+    "nodemailer": "^8.0.7",
     "react-day-picker": "8.10.1",
     "react-dnd": "16.0.1",
     "react-dnd-html5-backend": "16.0.1",

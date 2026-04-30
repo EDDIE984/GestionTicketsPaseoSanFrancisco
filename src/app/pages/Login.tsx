@@ -64,9 +64,9 @@ export function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           <img src={logoUrl} alt="Logo" className="w-64 drop-shadow-lg" />
           <div className="space-y-2">
             <h1 className="text-white text-2xl font-semibold tracking-wide">
-              Sistema de Control de Tickets
+              Proyecto Punto de Canje
             </h1>
-            <p className="text-slate-400 text-sm">Gestión integral de Tickets</p>
+            <p className="text-slate-400 text-sm">Sistema Gestión de Soporte</p>
           </div>
         </div>
       </div>
