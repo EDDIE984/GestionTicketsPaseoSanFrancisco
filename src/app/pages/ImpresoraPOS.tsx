@@ -33,9 +33,9 @@ const instaladores = [
   },
   {
     sistema: 'Windows',
-    detalle: 'Instalador para cajas Windows con impresora POS configurada.',
-    archivo: '/installers/paseo-ticket-printer-windows.exe',
-    nombre: 'paseo-ticket-printer-windows.exe',
+    detalle: 'Paquete instalador para cajas Windows con impresora POS configurada.',
+    archivo: '/installers/paseo-ticket-printer-windows.zip',
+    nombre: 'paseo-ticket-printer-windows.zip',
     icon: Monitor,
   },
 ];
