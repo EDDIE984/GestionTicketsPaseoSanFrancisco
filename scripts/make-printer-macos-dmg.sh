@@ -19,18 +19,23 @@ set -eu
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/Applications/PaseoTicketPrinter"
+PLIST_PATH="$HOME/Library/LaunchAgents/com.paseosanfrancisco.ticket-printer.plist"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js no esta instalado. Instala Node.js LTS y vuelve a ejecutar este instalador."
   exit 1
 fi
 
+NODE_BIN="$(command -v node)"
+
+launchctl unload "$PLIST_PATH" >/dev/null 2>&1 || true
+rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-cp -R "$SOURCE_DIR/printer-connector" "$INSTALL_DIR/printer-connector"
+cp -R "$SOURCE_DIR/printer-connector" "$INSTALL_DIR/"
 cp "$SOURCE_DIR/package.json" "$INSTALL_DIR/package.json"
 
 cd "$INSTALL_DIR"
-PRINTER_NAME="${PRINTER_NAME:-EPSON_TM_T20III}" npm run printer:install:mac
+NODE_BIN="$NODE_BIN" PRINTER_MODE="${PRINTER_MODE:-system}" PRINTER_NAME="${PRINTER_NAME:-EPSON_TM_T20III}" sh printer-connector/install-macos-service.sh
 
 echo ""
 echo "Conector instalado correctamente."
