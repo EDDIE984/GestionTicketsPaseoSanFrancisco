@@ -17,6 +17,13 @@ PRINTER_NAME="${PRINTER_NAME:-EPSON_TM_T20III}"
 PRINTER_CONNECTOR_PORT="${PRINTER_CONNECTOR_PORT:-3010}"
 PRINTER_CONNECTOR_HOST="${PRINTER_CONNECTOR_HOST:-127.0.0.1}"
 PRINTER_TOKEN="${PRINTER_TOKEN:-$PRINTER_TOKEN_FROM_ENV}"
+NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
+
+if [ -z "$NODE_BIN" ]; then
+  echo "Node.js no esta instalado o no se encontro en PATH."
+  echo "Instala Node.js LTS y vuelve a ejecutar el instalador."
+  exit 1
+fi
 
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$LOG_DIR"
@@ -32,10 +39,8 @@ cat > "$PLIST_PATH" <<EOF
   <string>$PROJECT_ROOT</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/env</string>
-    <string>npm</string>
-    <string>run</string>
-    <string>printer:server</string>
+    <string>$NODE_BIN</string>
+    <string>printer-connector/server.js</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -66,6 +71,7 @@ launchctl unload "$PLIST_PATH" >/dev/null 2>&1 || true
 launchctl load "$PLIST_PATH"
 
 echo "Servicio instalado: $PLIST_PATH"
+echo "Node: $NODE_BIN"
 echo "Impresora configurada: $PRINTER_NAME"
 echo "Conector: http://$PRINTER_CONNECTOR_HOST:$PRINTER_CONNECTOR_PORT"
 echo "Logs: $LOG_DIR"
