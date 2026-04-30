@@ -14,6 +14,7 @@
     "printer:uninstall:mac": "sh printer-connector/uninstall-macos-service.sh",
     "printer:test-load": "node scripts/test-printer-load.js",
     "installer:mac": "sh scripts/make-printer-macos-dmg.sh",
+    "installer:windows:zip": "sh scripts/make-printer-windows-zip.sh",
     "installer:windows": "powershell -ExecutionPolicy Bypass -File scripts/make-printer-windows-exe.ps1"
   },
   "dependencies": {
