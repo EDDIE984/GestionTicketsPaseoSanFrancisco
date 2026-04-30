@@ -196,6 +196,36 @@ async function writeToSystemPrinter(buffer) {
   fs.writeFileSync(tempFile, buffer);
 
   try {
+    if (process.platform === 'win32') {
+      await new Promise((resolve, reject) => {
+        execFile(
+          'powershell.exe',
+          [
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            path.resolve('printer-connector/windows-raw-print.ps1'),
+            '-PrinterName',
+            PRINTER_NAME,
+            '-Path',
+            tempFile,
+            '-DocumentName',
+            'Paseo Ticket Printer',
+          ],
+          (error, stdout, stderr) => {
+            if (error) {
+              reject(new Error(stderr || stdout || error.message));
+              return;
+            }
+            resolve();
+          }
+        );
+      });
+      return;
+    }
+
     await new Promise((resolve, reject) => {
       execFile('lp', ['-d', PRINTER_NAME, '-o', 'raw', tempFile], (error, stdout, stderr) => {
         if (error) {
@@ -213,6 +243,30 @@ async function writeToSystemPrinter(buffer) {
 async function cancelSystemPrinterQueue() {
   if (MODE !== 'system') return false;
   if (!PRINTER_NAME) throw new Error('Falta PRINTER_NAME para cancelar la cola');
+
+  if (process.platform === 'win32') {
+    await new Promise((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-Command',
+          `Get-PrintJob -PrinterName '${PRINTER_NAME.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Remove-PrintJob`,
+        ],
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(new Error(stderr || stdout || error.message));
+            return;
+          }
+          resolve();
+        }
+      );
+    });
+    return true;
+  }
 
   await new Promise((resolve, reject) => {
     execFile('cancel', ['-a', PRINTER_NAME], (error, stdout, stderr) => {

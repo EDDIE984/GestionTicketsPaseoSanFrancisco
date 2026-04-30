@@ -14,6 +14,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -Path (Join-Path $ProjectDir "printer-connector") -Destination $InstallDir -Recurse -Force
 Copy-Item -Path (Join-Path $ProjectDir "package.json") -Destination $InstallDir -Force
+Get-ChildItem -Path $InstallDir -Recurse -Include *.ps1 | Unblock-File -ErrorAction SilentlyContinue
 
 $EnvFile = Join-Path $InstallDir ".env"
 @"
