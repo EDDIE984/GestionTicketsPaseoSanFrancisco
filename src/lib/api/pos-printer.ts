@@ -5,6 +5,8 @@ export interface PosTicket {
   telefono: string;
   fechaHora: string;
   local: string;
+  index?: number;
+  total?: number;
 }
 
 export interface PosPrinterHealth {

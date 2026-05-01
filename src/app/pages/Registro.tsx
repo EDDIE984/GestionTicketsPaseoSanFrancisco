@@ -44,7 +44,6 @@ import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
 import { checkPosPrinter, enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
-import logoUrl from '@/images/LogoPSFBlanco.svg';
 
 interface MetodoPagoLocal {
   id: string;
@@ -78,6 +77,8 @@ interface FacturaPendiente {
   localId: string;
   localNombre?: string;
 }
+
+const TICKET_PAPER_CHARS = 42;
 
 interface EventoActivo {
   id: string;
@@ -648,16 +649,65 @@ export function Registro() {
     return `${factura.numeroFactura}-${String(indice + 1).padStart(4, '0')}`;
   };
 
+  const construirTicketPos = (factura: FacturaPendiente, indice: number, total: number): PosTicket => ({
+    ticketNumero: generarNumeroTicket(factura, indice),
+    cedula: ocultarCedula(factura.cedula),
+    nombre: `${factura.nombre} ${factura.apellido}`.trim(),
+    telefono: factura.telefono,
+    fechaHora: formatearFechaHoraRegistro(factura.fechaRegistro),
+    local: factura.localNombre || '—',
+    index: indice + 1,
+    total,
+  });
+
+  const normalizarTextoTicket = (value: string | number | null | undefined) =>
+    String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E]/g, '');
+
+  const centrarLineaTicket = (value: string) => {
+    const text = normalizarTextoTicket(value).slice(0, TICKET_PAPER_CHARS);
+    const padding = Math.max(Math.floor((TICKET_PAPER_CHARS - text.length) / 2), 0);
+    return `${' '.repeat(padding)}${text}`;
+  };
+
+  const envolverLineaTicket = (value: string, width = TICKET_PAPER_CHARS) => {
+    const words = normalizarTextoTicket(value).split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      if (`${current} ${word}`.trim().length > width) {
+        if (current) lines.push(current);
+        current = word.slice(0, width);
+      } else {
+        current = `${current} ${word}`.trim();
+      }
+    }
+
+    if (current) lines.push(current);
+    return lines.length ? lines : [''];
+  };
+
+  const construirLineasPreviewTicket = (ticket: PosTicket) => [
+    centrarLineaTicket('PASEO SAN FRANCISCO'),
+    centrarLineaTicket(`Ticket #: ${ticket.ticketNumero}`),
+    '-'.repeat(TICKET_PAPER_CHARS),
+    `Cedula: ${normalizarTextoTicket(ticket.cedula)}`,
+    ...envolverLineaTicket(`Nombre: ${ticket.nombre}`),
+    `Telefono: ${normalizarTextoTicket(ticket.telefono)}`,
+    `Fecha/Hora: ${normalizarTextoTicket(ticket.fechaHora)}`,
+    ...envolverLineaTicket(`Local: ${ticket.local}`),
+    '-'.repeat(TICKET_PAPER_CHARS),
+    centrarLineaTicket(`${ticket.index} de ${ticket.total}`),
+  ];
+
   const construirTicketsPos = (): PosTicket[] => {
     return facturasActuales.flatMap((facturaActual) =>
-      Array.from({ length: facturaActual.totalEntregables }).map((_, index) => ({
-        ticketNumero: generarNumeroTicket(facturaActual, index),
-        cedula: ocultarCedula(facturaActual.cedula),
-        nombre: `${facturaActual.nombre} ${facturaActual.apellido}`.trim(),
-        telefono: facturaActual.telefono,
-        fechaHora: formatearFechaHoraRegistro(facturaActual.fechaRegistro),
-        local: facturaActual.localNombre || '—',
-      }))
+      Array.from({ length: facturaActual.totalEntregables }).map((_, index) =>
+        construirTicketPos(facturaActual, index, facturaActual.totalEntregables),
+      )
     );
   };
 
@@ -1210,50 +1260,15 @@ export function Registro() {
                         <h3 className="font-semibold mb-4">Tickets de Entrega</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                           {Array.from({ length: facturaActual.totalEntregables }).map((_, index) => {
-                            const numeroTicket = generarNumeroTicket(facturaActual, index);
-                            const fechaHoraRegistro = formatearFechaHoraRegistro(facturaActual.fechaRegistro);
+                            const ticket = construirTicketPos(facturaActual, index, facturaActual.totalEntregables);
+                            const previewLines = construirLineasPreviewTicket(ticket);
                             return (
                               <div
                                 key={index}
-                                className="border-2 border-gray-300 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow print:break-inside-avoid overflow-hidden"
+                                className="overflow-hidden rounded-md border border-slate-300 bg-slate-100 p-3 shadow-sm transition-shadow hover:shadow-md print:break-inside-avoid"
                               >
-                                <div className="bg-slate-900 px-4 py-4 text-center">
-                                  <img src={logoUrl} alt="Paseo San Francisco" className="mx-auto h-12 max-w-44 object-contain" />
-                                </div>
-                                <div className="px-4 py-4">
-                                  <div className="mb-4 text-center">
-                                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Ticket #:</p>
-                                    <p className="text-3xl font-bold text-gray-900">{numeroTicket}</p>
-                                  </div>
-                                  <div className="space-y-2.5 text-sm">
-                                    <div>
-                                      <p className="text-xs text-gray-500">Cédula:</p>
-                                      <p className="font-semibold text-gray-900">{ocultarCedula(facturaActual.cedula)}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">Nombre:</p>
-                                      <p className="font-semibold text-gray-900 break-words leading-tight">
-                                        {facturaActual.nombre} {facturaActual.apellido}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">Teléfono:</p>
-                                      <p className="font-semibold text-gray-900">{facturaActual.telefono}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">Fecha y hora registro:</p>
-                                      <p className="font-semibold text-gray-900">{fechaHoraRegistro}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">Local comercial:</p>
-                                      <p className="font-semibold text-gray-900">{facturaActual.localNombre || '—'}</p>
-                                    </div>
-                                  </div>
-                                  <div className="mt-4 border-t pt-3 text-center">
-                                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300">
-                                      Ticket {index + 1} de {facturaActual.totalEntregables}
-                                    </Badge>
-                                  </div>
+                                <div className="mx-auto w-full max-w-[310px] bg-white px-4 py-5 text-slate-950 shadow-inner">
+                                  <pre className="m-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-5 tracking-normal">{previewLines.join('\n')}</pre>
                                 </div>
                               </div>
                             );

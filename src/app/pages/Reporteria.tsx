@@ -1,4 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Label } from '@/app/components/ui/label';
 import {
@@ -9,92 +11,46 @@ import {
   SelectValue,
 } from '@/app/components/ui/select';
 import { Button } from '@/app/components/ui/button';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Calendar, ShoppingCart, Receipt, Ticket, Store, TrendingUp } from 'lucide-react';
-
-// Datos de ejemplo de eventos/campañas activos
-const eventosActivos = [
-  { 
-    id: 1, 
-    nombre: 'Campaña Verano 2026', 
-    activo: true, 
-    cuponId: 1, 
-    cuponNombre: 'Dinners triple cupon',
-    valorMinimo: 50,
-    valorMaximo: 500
-  },
-  { 
-    id: 2, 
-    nombre: 'Promoción Navideña', 
-    activo: true, 
-    cuponId: 6, 
-    cuponNombre: 'Cupon especial navidad',
-    valorMinimo: 100,
-    valorMaximo: 1000
-  },
-  { 
-    id: 3, 
-    nombre: 'Evento Aniversario', 
-    activo: true, 
-    cuponId: 8, 
-    cuponNombre: 'Cupon aniversario',
-    valorMinimo: 75,
-    valorMaximo: 750
-  },
-];
-
-// Datos de ejemplo de locales comerciales
-const localesComerciales = [
-  { id: 1, nombre: 'LAND ROVERIA', categoria: 'Retail' },
-  { id: 2, nombre: 'AMBACAR', categoria: 'Servicio' },
-  { id: 3, nombre: 'BAUER', categoria: 'Retail' },
-  { id: 4, nombre: 'BYD', categoria: 'Retail' },
-  { id: 5, nombre: 'BYOACCA', categoria: 'HOGAR' },
-  { id: 6, nombre: 'PYCCA', categoria: 'HOGAR' },
-  { id: 7, nombre: 'PICHINCHA', categoria: 'GASTRONOMIA' },
-];
-
-// Categorías disponibles
-const categorias = [
-  { id: 1, nombre: 'FARMACIA', color: '#10b981' },
-  { id: 2, nombre: 'Servicio', color: '#3b82f6' },
-  { id: 3, nombre: 'Retail', color: '#06b6d4' },
-  { id: 4, nombre: 'GASTRONOMIA', color: '#d946ef' },
-  { id: 5, nombre: 'HOGAR', color: '#f97316' },
-];
-
-// Facturas de ejemplo (simulando datos)
-const facturasEjemplo = [
-  // Campaña Verano 2026 - Enero
-  { id: 1, eventoId: 1, localId: 1, categoriaId: 3, cedula: '1720345678', monto: 350, entregables: 13, fecha: '2026-01-05', mes: 0, dia: 5 },
-  { id: 2, eventoId: 1, localId: 3, categoriaId: 3, cedula: '0923456789', monto: 275, entregables: 11, fecha: '2026-01-08', mes: 0, dia: 8 },
-  { id: 3, eventoId: 1, localId: 4, categoriaId: 3, cedula: '1720345678', monto: 420, entregables: 16, fecha: '2026-01-12', mes: 0, dia: 12 },
-  { id: 4, eventoId: 1, localId: 2, categoriaId: 2, cedula: '0998765432', monto: 550, entregables: 20, fecha: '2026-01-15', mes: 0, dia: 15 },
-  { id: 5, eventoId: 1, localId: 1, categoriaId: 3, cedula: '1715678901', monto: 380, entregables: 14, fecha: '2026-01-18', mes: 0, dia: 18 },
-  { id: 6, eventoId: 1, localId: 5, categoriaId: 5, cedula: '0923456789', monto: 290, entregables: 12, fecha: '2026-01-20', mes: 0, dia: 20 },
-  { id: 7, eventoId: 1, localId: 6, categoriaId: 5, cedula: '1720345678', monto: 475, entregables: 18, fecha: '2026-01-22', mes: 0, dia: 22 },
-  { id: 8, eventoId: 1, localId: 7, categoriaId: 4, cedula: '0912345678', monto: 320, entregables: 13, fecha: '2026-01-25', mes: 0, dia: 25 },
-  
-  // Promoción Navideña - Diciembre
-  { id: 9, eventoId: 2, localId: 1, categoriaId: 3, cedula: '0912345678', monto: 450, entregables: 18, fecha: '2025-12-05', mes: 11, dia: 5 },
-  { id: 10, eventoId: 2, localId: 7, categoriaId: 4, cedula: '1708901234', monto: 600, entregables: 42, fecha: '2025-12-10', mes: 11, dia: 10 },
-  { id: 11, eventoId: 2, localId: 2, categoriaId: 2, cedula: '1715678901', monto: 800, entregables: 48, fecha: '2025-12-12', mes: 11, dia: 12 },
-  { id: 12, eventoId: 2, localId: 5, categoriaId: 5, cedula: '0923456789', monto: 550, entregables: 35, fecha: '2025-12-15', mes: 11, dia: 15 },
-  { id: 13, eventoId: 2, localId: 6, categoriaId: 5, cedula: '1720345678', monto: 680, entregables: 40, fecha: '2025-12-18', mes: 11, dia: 18 },
-  { id: 14, eventoId: 2, localId: 3, categoriaId: 3, cedula: '0912345678', monto: 720, entregables: 45, fecha: '2025-12-20', mes: 11, dia: 20 },
-  { id: 15, eventoId: 2, localId: 4, categoriaId: 3, cedula: '1708901234', monto: 850, entregables: 52, fecha: '2025-12-22', mes: 11, dia: 22 },
-  { id: 16, eventoId: 2, localId: 1, categoriaId: 3, cedula: '1715678901', monto: 920, entregables: 58, fecha: '2025-12-25', mes: 11, dia: 25 },
-  
-  // Evento Aniversario - Febrero
-  { id: 17, eventoId: 3, localId: 1, categoriaId: 3, cedula: '1715678901', monto: 525, entregables: 31, fecha: '2026-02-05', mes: 1, dia: 5 },
-  { id: 18, eventoId: 3, localId: 2, categoriaId: 2, cedula: '0923456789', monto: 450, entregables: 28, fecha: '2026-02-08', mes: 1, dia: 8 },
-  { id: 19, eventoId: 3, localId: 7, categoriaId: 4, cedula: '1720345678', monto: 600, entregables: 36, fecha: '2026-02-12', mes: 1, dia: 12 },
-  { id: 20, eventoId: 3, localId: 5, categoriaId: 5, cedula: '0912345678', monto: 375, entregables: 25, fecha: '2026-02-15', mes: 1, dia: 15 },
-  { id: 21, eventoId: 3, localId: 6, categoriaId: 5, cedula: '1708901234', monto: 480, entregables: 30, fecha: '2026-02-18', mes: 1, dia: 18 },
-  { id: 22, eventoId: 3, localId: 3, categoriaId: 3, cedula: '1715678901', monto: 550, entregables: 33, fecha: '2026-02-20', mes: 1, dia: 20 },
-  { id: 23, eventoId: 3, localId: 4, categoriaId: 3, cedula: '0923456789', monto: 625, entregables: 38, fecha: '2026-02-22', mes: 1, dia: 22 },
-  { id: 24, eventoId: 3, localId: 1, categoriaId: 3, cedula: '1720345678', monto: 700, entregables: 42, fecha: '2026-02-25', mes: 1, dia: 25 },
-];
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/app/components/ui/table';
+import {
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
+import {
+  Calendar,
+  CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  Loader2,
+  Receipt,
+  ShoppingCart,
+  Store,
+  Ticket,
+  TrendingUp,
+} from 'lucide-react';
+import {
+  fetchEventosReporteria,
+  fetchFacturasReporteria,
+  type ReporteriaEvento,
+  type ReporteriaFactura,
+} from '@/lib/api/reporteria';
 
 const meses = [
   { valor: 0, nombre: 'enero' },
@@ -111,64 +67,145 @@ const meses = [
   { valor: 11, nombre: 'diciembre' },
 ];
 
+const COLORS = ['#0f766e', '#2563eb', '#c2410c', '#9333ea', '#ca8a04', '#4f46e5'];
+
+function formatMiles(value: number | string | null | undefined, decimals = 0) {
+  const parsed = parseNumber(value);
+  const fixed = parsed.toFixed(decimals);
+  const [integerPart, decimalPart] = fixed.split('.');
+  const integerWithThousands = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return decimalPart ? `${integerWithThousands},${decimalPart}` : integerWithThousands;
+}
+
+function formatMoney(value: number | string | null | undefined) {
+  return `$ ${formatMiles(value, 2)}`;
+}
+
+function parseNumber(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getDateParts(dateValue: string) {
+  const [year, month, day] = dateValue.split('T')[0].split('-').map(Number);
+  return {
+    year,
+    month: (month || 1) - 1,
+    day: day || 1,
+  };
+}
+
+function formatDate(dateValue: string | null | undefined) {
+  if (!dateValue) return '';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return dateValue;
+  return date.toLocaleString('es-EC', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getConsentimiento(factura: ReporteriaFactura) {
+  return factura.clientes?.formularios_consentimiento?.[0] ?? null;
+}
+
+function getClienteNombre(factura: ReporteriaFactura) {
+  return `${factura.clientes?.nombre ?? ''} ${factura.clientes?.apellido ?? ''}`.trim();
+}
+
+function getMetodosPago(factura: ReporteriaFactura) {
+  return factura.factura_metodos_pago
+    .map((metodo) => `${metodo.metodos_pago?.nombre ?? 'Sin método'} ${formatMoney(metodo.monto)}`)
+    .join(' | ');
+}
+
+function getCupones(factura: ReporteriaFactura) {
+  return factura.factura_metodos_pago
+    .filter((metodo) => metodo.cupones?.nombre)
+    .map((metodo) => `${metodo.cupones?.nombre} x${metodo.cupon_numero ?? 0}`)
+    .join(' | ');
+}
+
 export function Reporteria() {
-  const [campaniaSeleccionada, setCampaniaSeleccionada] = useState('2');
-  const [mesesSeleccionados, setMesesSeleccionados] = useState<number[]>([11]); // Diciembre por defecto
+  const [eventos, setEventos] = useState<ReporteriaEvento[]>([]);
+  const [facturas, setFacturas] = useState<ReporteriaFactura[]>([]);
+  const [campaniaSeleccionada, setCampaniaSeleccionada] = useState('');
+  const [mesesSeleccionados, setMesesSeleccionados] = useState<number[]>([]);
   const [diasSeleccionados, setDiasSeleccionados] = useState<number[]>([]);
+  const [cargandoEventos, setCargandoEventos] = useState(true);
+  const [cargandoFacturas, setCargandoFacturas] = useState(false);
+
+  useEffect(() => {
+    fetchEventosReporteria()
+      .then((data) => {
+        setEventos(data);
+        setCampaniaSeleccionada(data[0]?.id ?? '');
+      })
+      .catch(() => toast.error('Error al cargar campañas para reportería'))
+      .finally(() => setCargandoEventos(false));
+  }, []);
+
+  useEffect(() => {
+    if (!campaniaSeleccionada) {
+      setFacturas([]);
+      return;
+    }
+
+    setCargandoFacturas(true);
+    fetchFacturasReporteria(campaniaSeleccionada)
+      .then(setFacturas)
+      .catch(() => {
+        setFacturas([]);
+        toast.error('Error al cargar facturas de la campaña');
+      })
+      .finally(() => setCargandoFacturas(false));
+  }, [campaniaSeleccionada]);
 
   const toggleMes = (mes: number) => {
-    setMesesSeleccionados(prev => 
-      prev.includes(mes) ? prev.filter(m => m !== mes) : [...prev, mes]
+    setMesesSeleccionados((prev) =>
+      prev.includes(mes) ? prev.filter((m) => m !== mes) : [...prev, mes],
     );
   };
 
   const toggleDia = (dia: number) => {
-    setDiasSeleccionados(prev => 
-      prev.includes(dia) ? prev.filter(d => d !== dia) : [...prev, dia]
+    setDiasSeleccionados((prev) =>
+      prev.includes(dia) ? prev.filter((d) => d !== dia) : [...prev, dia],
     );
   };
 
-  // Filtrar facturas según los criterios seleccionados
   const facturasFiltradas = useMemo(() => {
-    let filtradas = facturasEjemplo.filter(f => f.eventoId.toString() === campaniaSeleccionada);
-    
-    if (mesesSeleccionados.length > 0) {
-      filtradas = filtradas.filter(f => mesesSeleccionados.includes(f.mes));
-    }
-    
-    if (diasSeleccionados.length > 0) {
-      filtradas = filtradas.filter(f => diasSeleccionados.includes(f.dia));
-    }
-    
-    return filtradas;
-  }, [campaniaSeleccionada, mesesSeleccionados, diasSeleccionados]);
+    return facturas.filter((factura) => {
+      const { month, day } = getDateParts(factura.fecha_emision);
+      if (mesesSeleccionados.length > 0 && !mesesSeleccionados.includes(month)) return false;
+      if (diasSeleccionados.length > 0 && !diasSeleccionados.includes(day)) return false;
+      return true;
+    });
+  }, [facturas, mesesSeleccionados, diasSeleccionados]);
 
-  // Calcular KPIs
   const kpis = useMemo(() => {
     const totalFacturas = facturasFiltradas.length;
-    const montoTotal = facturasFiltradas.reduce((sum, f) => sum + f.monto, 0);
-    const totalEntregables = facturasFiltradas.reduce((sum, f) => sum + f.entregables, 0);
-    const compradoresUnicos = new Set(facturasFiltradas.map(f => f.cedula)).size;
-    const ticketPromedio = totalFacturas > 0 ? montoTotal / totalFacturas : 0;
+    const montoTotal = facturasFiltradas.reduce((sum, f) => sum + parseNumber(f.monto_total), 0);
+    const totalEntregables = facturasFiltradas.reduce((sum, f) => sum + parseNumber(f.total_entregables), 0);
+    const compradoresUnicos = new Set(facturasFiltradas.map((f) => f.clientes?.cedula).filter(Boolean)).size;
+    const conConsentimiento = facturasFiltradas.filter((f) => getConsentimiento(f)?.acepta_proteccion_datos).length;
 
     return {
-      ticketPromedio,
+      ticketPromedio: totalFacturas > 0 ? montoTotal / totalFacturas : 0,
       compradoresUnicos,
       facturasTotal: totalFacturas,
       canjeTotal: totalEntregables,
-      montoTotal
+      montoTotal,
+      conConsentimiento,
     };
   }, [facturasFiltradas]);
 
-  // Datos para gráfico de Canje por Local
   const datosCanjeLocal = useMemo(() => {
-    const grupos = facturasFiltradas.reduce((acc, f) => {
-      const local = localesComerciales.find(l => l.id === f.localId);
-      const nombreLocal = local?.nombre || 'Desconocido';
-      if (!acc[nombreLocal]) {
-        acc[nombreLocal] = 0;
-      }
-      acc[nombreLocal] += f.entregables;
+    const grupos = facturasFiltradas.reduce((acc, factura) => {
+      const local = factura.locales?.nombre ?? 'Sin local';
+      acc[local] = (acc[local] ?? 0) + parseNumber(factura.total_entregables);
       return acc;
     }, {} as Record<string, number>);
 
@@ -177,98 +214,149 @@ export function Reporteria() {
       .sort((a, b) => b.total - a.total);
   }, [facturasFiltradas]);
 
-  // Datos para gráfico de Canje por Categoría
   const datosCanjeCategoria = useMemo(() => {
-    const grupos = facturasFiltradas.reduce((acc, f) => {
-      const local = localesComerciales.find(l => l.id === f.localId);
-      const categoria = local?.categoria || 'Otros';
-      if (!acc[categoria]) {
-        acc[categoria] = 0;
-      }
-      acc[categoria] += f.entregables;
+    const grupos = facturasFiltradas.reduce((acc, factura) => {
+      const categoria = factura.locales?.categorias?.nombre ?? 'Sin categoría';
+      acc[categoria] = (acc[categoria] ?? 0) + parseNumber(factura.total_entregables);
       return acc;
     }, {} as Record<string, number>);
 
-    const total = Object.values(grupos).reduce((sum, val) => sum + val, 0);
+    const total = Object.values(grupos).reduce((sum, value) => sum + value, 0);
 
     return Object.entries(grupos).map(([nombre, value]) => ({
       nombre,
       value,
-      porcentaje: total > 0 ? ((value / total) * 100).toFixed(2) : '0'
+      porcentaje: total > 0 ? Number(((value / total) * 100).toFixed(2)) : 0,
     }));
   }, [facturasFiltradas]);
 
-  // Datos para gráfico de Canje por Días
   const datosCanjesDias = useMemo(() => {
-    const diasDelMes = Array.from({ length: 28 }, (_, i) => i + 1);
-    
-    return diasDelMes.map(dia => {
-      const totalDia = facturasFiltradas
-        .filter(f => f.dia === dia)
-        .reduce((sum, f) => f.entregables, 0);
-      
+    return Array.from({ length: 31 }, (_, index) => {
+      const dia = index + 1;
+      const total = facturasFiltradas
+        .filter((factura) => getDateParts(factura.fecha_emision).day === dia)
+        .reduce((sum, factura) => sum + parseNumber(factura.total_entregables), 0);
+      return { dia, total };
+    });
+  }, [facturasFiltradas]);
+
+  const rowsExcel = useMemo(() => {
+    return facturasFiltradas.map((factura) => {
+      const consentimiento = getConsentimiento(factura);
+      const entregablesPorMetodo = factura.factura_metodos_pago
+        .map((metodo) => `${metodo.metodos_pago?.nombre ?? 'Sin método'}: ${formatMiles(metodo.entregables_calculados)}`)
+        .join(' | ');
+
       return {
-        dia,
-        total: totalDia
+        Campaña: factura.eventos_campanas?.nombre ?? '',
+        Local: factura.locales?.nombre ?? '',
+        Categoría: factura.locales?.categorias?.nombre ?? '',
+        Cliente: getClienteNombre(factura),
+        'RUC o cédula': factura.clientes?.cedula ?? '',
+        Mail: factura.clientes?.correo ?? '',
+        Teléfono: factura.clientes?.telefono ?? '',
+        Dirección: factura.clientes?.direccion ?? '',
+        Género: factura.clientes?.genero ?? '',
+        Factura: factura.numero_factura,
+        'Monto factura': formatMiles(factura.monto_total, 2),
+        'Fecha emisión': factura.fecha_emision,
+        'Fecha creación': formatDate(factura.fecha_registro),
+        'Total entregables': formatMiles(factura.total_entregables),
+        'Tickets impresos': factura.tickets_impresos ? 'Sí' : 'No',
+        'Fecha impresión': formatDate(factura.tickets_impresos_at),
+        'Acepta términos y condiciones': consentimiento?.acepta_proteccion_datos ? 'Sí' : 'No',
+        'Acepta publicidad': consentimiento?.acepta_publicidad ? 'Sí' : 'No',
+        'Fecha aceptación': formatDate(consentimiento?.fecha_aceptacion),
+        'Correo consentimiento enviado': formatDate(consentimiento?.correo_enviado_at),
+        'Formulario enviado': formatDate(consentimiento?.formulario_enviado_at),
+        'Métodos de pago': getMetodosPago(factura),
+        Cupones: getCupones(factura),
+        'Entregables por método': entregablesPorMetodo,
+        Cajero: factura.usuarios?.nombre ?? '',
+        'Email cajero': factura.usuarios?.email ?? '',
       };
     });
   }, [facturasFiltradas]);
 
-  const COLORS = ['#06b6d4', '#3b82f6', '#d946ef', '#f97316', '#10b981', '#eab308'];
+  const exportarExcel = () => {
+    if (rowsExcel.length === 0) {
+      toast.error('No hay datos para exportar con los filtros actuales');
+      return;
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(rowsExcel);
+    worksheet['!cols'] = Object.keys(rowsExcel[0]).map((key) => ({
+      wch: Math.max(key.length + 2, 16),
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Detalle facturas');
+    XLSX.writeFile(workbook, `reporteria-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success('Excel generado correctamente');
+  };
+
+  const campaniaActual = eventos.find((evento) => evento.id === campaniaSeleccionada);
+  const cargando = cargandoEventos || cargandoFacturas;
 
   return (
-    <div className="p-8 bg-gray-50 min-h-screen">
-      <div className="mb-6">
-        <h1 className="text-3xl mb-2 text-gray-900">Reportería</h1>
-        <p className="text-gray-600">
-          Dashboard de análisis de campañas y eventos
-        </p>
+    <div className="min-h-screen bg-slate-50 p-6 lg:p-8">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold text-slate-950">Reportería</h1>
+          <p className="mt-2 text-slate-600">Dashboard conectado a facturas reales, clientes, locales y consentimientos.</p>
+        </div>
+        <Button onClick={exportarExcel} disabled={cargando || rowsExcel.length === 0} className="w-full bg-teal-700 hover:bg-teal-800 lg:w-auto">
+          <Download className="mr-2 h-4 w-4" />
+          Descargar Excel
+        </Button>
       </div>
 
       <div className="grid grid-cols-12 gap-6">
-        {/* Panel Izquierdo - Filtros */}
-        <div className="col-span-12 lg:col-span-3 space-y-4">
-          {/* Selector de Campaña */}
+        <div className="col-span-12 space-y-4 lg:col-span-3">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <TrendingUp className="h-4 w-4" />
                 Campaña
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <Select value={campaniaSeleccionada} onValueChange={setCampaniaSeleccionada}>
+            <CardContent className="space-y-3">
+              <Select value={campaniaSeleccionada} onValueChange={setCampaniaSeleccionada} disabled={cargandoEventos}>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecciona campaña" />
                 </SelectTrigger>
                 <SelectContent>
-                  {eventosActivos.map((evento) => (
-                    <SelectItem key={evento.id} value={evento.id.toString()}>
+                  {eventos.map((evento) => (
+                    <SelectItem key={evento.id} value={evento.id}>
                       {evento.nombre}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {campaniaActual && (
+                <p className="text-xs leading-5 text-slate-500">
+                  Vigencia: {formatDate(campaniaActual.fecha_inicio)} - {formatDate(campaniaActual.fecha_fin)}
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          {/* Selector de Mes */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                Mes
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Calendar className="h-4 w-4" />
+                Mes de emisión
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-2">
-                {meses.slice(0, 6).map((mes) => (
+              <div className="grid grid-cols-2 gap-2">
+                {meses.map((mes) => (
                   <Button
                     key={mes.valor}
-                    variant={mesesSeleccionados.includes(mes.valor) ? "default" : "outline"}
+                    variant={mesesSeleccionados.includes(mes.valor) ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => toggleMes(mes.valor)}
-                    className="text-xs"
+                    className="justify-start text-xs capitalize"
                   >
                     {mes.nombre}
                   </Button>
@@ -277,23 +365,22 @@ export function Reporteria() {
             </CardContent>
           </Card>
 
-          {/* Selector de Día */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                Día
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Calendar className="h-4 w-4" />
+                Día de emisión
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-4 gap-2">
-                {Array.from({ length: 8 }, (_, i) => i + 1).map((dia) => (
+              <div className="grid grid-cols-5 gap-2">
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => (
                   <Button
                     key={dia}
-                    variant={diasSeleccionados.includes(dia) ? "default" : "outline"}
+                    variant={diasSeleccionados.includes(dia) ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => toggleDia(dia)}
-                    className="text-xs"
+                    className="px-0 text-xs"
                   >
                     {dia}
                   </Button>
@@ -302,7 +389,6 @@ export function Reporteria() {
             </CardContent>
           </Card>
 
-          {/* Botón para limpiar filtros */}
           <Button
             variant="outline"
             className="w-full"
@@ -311,151 +397,231 @@ export function Reporteria() {
               setDiasSeleccionados([]);
             }}
           >
-            Limpiar Filtros
+            Limpiar filtros
           </Button>
         </div>
 
-        {/* Panel Derecho - Dashboard */}
-        <div className="col-span-12 lg:col-span-9 space-y-6">
-          {/* KPIs - Tarjetas superiores */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Ticket Promedio */}
-            <Card className="bg-gradient-to-br from-purple-50 to-white border-purple-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-purple-600" />
-                  Ticket Promedio
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-purple-600">
-                  {kpis.ticketPromedio.toFixed(2)}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Compradores Únicos */}
-            <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <ShoppingCart className="w-4 h-4 text-blue-600" />
-                  Compradores Únicos
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-blue-600">
-                  {kpis.compradoresUnicos}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Facturas Totales */}
-            <Card className="bg-gradient-to-br from-orange-50 to-white border-orange-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-orange-600" />
-                  Facturas Totales
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-orange-600">
-                  {kpis.facturasTotal}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Canje Total */}
-            <Card className="bg-gradient-to-br from-emerald-50 to-white border-emerald-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <Ticket className="w-4 h-4 text-emerald-600" />
-                  Canje Total
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-emerald-600">
-                  {kpis.canjeTotal}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Gráficos principales */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Canje por Local */}
+        <div className="col-span-12 space-y-6 lg:col-span-9">
+          {cargando && (
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Store className="w-5 h-5" />
-                  Canje por Local
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={datosCanjeLocal} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis dataKey="nombre" type="category" width={100} tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Bar dataKey="total" fill="#8b5cf6" />
-                  </BarChart>
-                </ResponsiveContainer>
+              <CardContent className="flex items-center gap-3 py-6 text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando datos reales de reportería...
               </CardContent>
             </Card>
+          )}
 
-            {/* Canje por Categoría */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5" />
-                  Canje por Categoría
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={datosCanjeCategoria}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ nombre, porcentaje }) => `${nombre} ${porcentaje}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {datosCanjeCategoria.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </div>
+          <Tabs defaultValue="dashboard" className="gap-4">
+            <TabsList>
+              <TabsTrigger value="dashboard">
+                <TrendingUp className="h-4 w-4" />
+                Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="excel">
+                <FileSpreadsheet className="h-4 w-4" />
+                Data Excel
+              </TabsTrigger>
+            </TabsList>
 
-          {/* Canje por Días */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
-                Canje por Días
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={datosCanjesDias}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="total" fill="#8b5cf6" name="Entregables" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            <TabsContent value="dashboard" className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                <Card className="border-teal-200 bg-teal-50">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <Receipt className="h-4 w-4 text-teal-700" />
+                      Ticket promedio
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold text-teal-800">{formatMoney(kpis.ticketPromedio)}</div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <ShoppingCart className="h-4 w-4 text-blue-700" />
+                      Compradores únicos
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold text-slate-950">{formatMiles(kpis.compradoresUnicos)}</div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <Receipt className="h-4 w-4 text-orange-700" />
+                      Facturas
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold text-slate-950">{formatMiles(kpis.facturasTotal)}</div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <Ticket className="h-4 w-4 text-indigo-700" />
+                      Canje total
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold text-slate-950">{formatMiles(kpis.canjeTotal)}</div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                      Con términos
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold text-slate-950">{formatMiles(kpis.conConsentimiento)}</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Store className="h-5 w-5" />
+                      Canje por local
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={datosCanjeLocal} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" tickFormatter={(value) => formatMiles(value)} />
+                        <YAxis dataKey="nombre" type="category" width={120} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(value) => formatMiles(Number(value))} />
+                        <Bar dataKey="total" fill="#0f766e" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5" />
+                      Canje por categoría
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <PieChart>
+                        <Pie
+                          data={datosCanjeCategoria}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ nombre, porcentaje }) => `${nombre} ${formatMiles(Number(porcentaje), 2)}%`}
+                          outerRadius={90}
+                          dataKey="value"
+                        >
+                          {datosCanjeCategoria.map((entry, index) => (
+                            <Cell key={`${entry.nombre}-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => formatMiles(Number(value))} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Calendar className="h-5 w-5" />
+                    Canje por día de emisión
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={datosCanjesDias}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
+                      <YAxis tickFormatter={(value) => formatMiles(value)} />
+                      <Tooltip formatter={(value) => formatMiles(Number(value))} />
+                      <Legend />
+                      <Bar dataKey="total" fill="#0f766e" name="Entregables" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="excel" className="space-y-4">
+              <Card>
+                <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <CardTitle>Detalle para análisis</CardTitle>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {formatMiles(rowsExcel.length)} registros listos para descargar según los filtros actuales.
+                    </p>
+                  </div>
+                  <Button onClick={exportarExcel} disabled={cargando || rowsExcel.length === 0} className="bg-teal-700 hover:bg-teal-800">
+                    <Download className="mr-2 h-4 w-4" />
+                    Descargar Excel
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  <div className="max-h-[520px] overflow-auto rounded-md border bg-white">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Campaña</TableHead>
+                          <TableHead>Local</TableHead>
+                          <TableHead>Categoría</TableHead>
+                          <TableHead>Cliente</TableHead>
+                          <TableHead>RUC/Cédula</TableHead>
+                          <TableHead>Mail</TableHead>
+                          <TableHead>Teléfono</TableHead>
+                          <TableHead>Factura</TableHead>
+                          <TableHead>Monto</TableHead>
+                          <TableHead>Entregables</TableHead>
+                          <TableHead>Términos</TableHead>
+                          <TableHead>Fecha creación</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {facturasFiltradas.slice(0, 100).map((factura) => {
+                          const consentimiento = getConsentimiento(factura);
+                          return (
+                            <TableRow key={factura.id}>
+                              <TableCell>{factura.eventos_campanas?.nombre ?? ''}</TableCell>
+                              <TableCell>{factura.locales?.nombre ?? ''}</TableCell>
+                              <TableCell>{factura.locales?.categorias?.nombre ?? ''}</TableCell>
+                              <TableCell>{getClienteNombre(factura)}</TableCell>
+                              <TableCell>{factura.clientes?.cedula ?? ''}</TableCell>
+                              <TableCell>{factura.clientes?.correo ?? ''}</TableCell>
+                              <TableCell>{factura.clientes?.telefono ?? ''}</TableCell>
+                              <TableCell>{factura.numero_factura}</TableCell>
+                              <TableCell>{formatMoney(factura.monto_total)}</TableCell>
+                              <TableCell>{formatMiles(factura.total_entregables)}</TableCell>
+                              <TableCell>{consentimiento?.acepta_proteccion_datos ? 'Sí' : 'No'}</TableCell>
+                              <TableCell>{formatDate(factura.fecha_registro)}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <Label className="mt-3 block text-xs text-slate-500">
+                    La vista muestra hasta 100 filas para mantener la pantalla ágil; el Excel descarga todos los registros filtrados.
+                  </Label>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

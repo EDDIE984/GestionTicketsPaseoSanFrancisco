@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useLocation, Link, Outlet } from 'react-router';
-import { Menu, Settings, ClipboardList, BarChart3, TrendingUp, Database } from 'lucide-react';
+import { Menu, Settings, ClipboardList, BarChart3, TrendingUp, Database, Printer } from 'lucide-react';
 import logo from '@/images/LogoPSFBlanco.svg';
+import { checkPosPrinter, type PosPrinterHealth } from '@/lib/api/pos-printer';
+
+type PrinterConnectionStatus = 'checking' | 'connected' | 'disconnected';
 
 export function Layout({ user, logout }: { user: any; logout: () => void }) {
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>('checking');
+  const [printerHealth, setPrinterHealth] = useState<PosPrinterHealth | null>(null);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -16,6 +21,38 @@ export function Layout({ user, logout }: { user: any; logout: () => void }) {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const validatePrinter = async () => {
+      try {
+        const health = await checkPosPrinter();
+        if (!isMounted) return;
+        setPrinterHealth(health);
+        setPrinterStatus('connected');
+      } catch {
+        if (!isMounted) return;
+        setPrinterHealth(null);
+        setPrinterStatus('disconnected');
+      }
+    };
+
+    const handleFocus = () => {
+      setPrinterStatus((current) => (current === 'connected' ? current : 'checking'));
+      void validatePrinter();
+    };
+
+    void validatePrinter();
+    const interval = window.setInterval(validatePrinter, 30000);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
     };
   }, []);
 
@@ -114,6 +151,29 @@ export function Layout({ user, logout }: { user: any; logout: () => void }) {
               }`}
             />
             <p className="text-xs text-white/30">Ticket System v1.0</p>
+          </div>
+          <div
+            className={`mt-2 flex items-center gap-2 ${!isSidebarOpen && 'hidden'}`}
+            title={
+              printerStatus === 'connected'
+                ? `Impresora POS conectada${printerHealth?.printerName ? `: ${printerHealth.printerName}` : ''}`
+                : printerStatus === 'checking'
+                  ? 'Validando conexión con impresora POS'
+                  : 'Impresora POS no detectada'
+            }
+          >
+            <Printer
+              className={`w-3.5 h-3.5 flex-shrink-0 ${
+                printerStatus === 'connected'
+                  ? 'text-green-400'
+                  : printerStatus === 'checking'
+                    ? 'text-yellow-300'
+                    : 'text-red-400'
+              }`}
+            />
+            <p className="truncate text-xs text-white/30">
+              POS {printerStatus === 'connected' ? 'conectada' : printerStatus === 'checking' ? 'validando...' : 'sin conexión'}
+            </p>
           </div>
           <div className={`flex items-center gap-2 mt-2 ${!isSidebarOpen && 'hidden'}`}>
             <span className="text-xs text-white/50">{user?.nombre} ({user?.rol})</span>
