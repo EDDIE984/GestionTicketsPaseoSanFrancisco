@@ -126,10 +126,12 @@ export async function esperarTrabajoImpresion(jobId: string, options = { timeout
   throw new Error('La impresión sigue en proceso. Revisa la cola de la consola local antes de reintentar.');
 }
 
-export async function imprimirTicketPrueba() {
-  return enviarTicketsACola([
-    {
-      ticketNumero: `TEST-${Date.now()}`,
+export async function imprimirTicketPrueba(cantidad = 1) {
+  const total = Math.max(1, Math.min(Math.floor(cantidad), 5000));
+  const timestamp = Date.now();
+  return enviarTicketsACola(
+    Array.from({ length: total }, (_, index) => ({
+      ticketNumero: `TEST-${timestamp}-${String(index + 1).padStart(4, '0')}`,
       cedula: 'XXXXXXX465',
       nombre: 'PRUEBA DE IMPRESION',
       telefono: '0999999999',
@@ -138,6 +140,6 @@ export async function imprimirTicketPrueba() {
         timeStyle: 'medium',
       }),
       local: 'CONSOLA LOCAL',
-    },
-  ]);
+    }))
+  );
 }

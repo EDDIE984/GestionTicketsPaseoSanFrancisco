@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { Badge } from '@/app/components/ui/badge';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
+import { Input } from '@/app/components/ui/input';
+import { Label } from '@/app/components/ui/label';
 import { cancelarColaImpresion, checkPosPrinter, fetchPosPrinterJobs, imprimirTicketPrueba, type PosPrinterHealth, type PosPrinterJob } from '@/lib/api/pos-printer';
 
 const estadoClase: Record<PosPrinterJob['status'], string> = {
@@ -55,6 +57,7 @@ export function ImpresoraPOS() {
   const [cargando, setCargando] = useState(true);
   const [probando, setProbando] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  const [cantidadPrueba, setCantidadPrueba] = useState(1);
   const [error, setError] = useState('');
 
   const trabajosRecientes = useMemo(() => jobs.slice().reverse().slice(0, 8), [jobs]);
@@ -84,10 +87,11 @@ export function ImpresoraPOS() {
   }, []);
 
   const probarImpresion = async () => {
+    const cantidad = Math.max(1, Math.min(Math.floor(Number(cantidadPrueba) || 1), 5000));
     setProbando(true);
     try {
-      const job = await imprimirTicketPrueba();
-      toast.success(`Ticket de prueba enviado a la cola ${job.jobId}`);
+      const job = await imprimirTicketPrueba(cantidad);
+      toast.success(`${job.totalTickets} ticket(s) de prueba enviados a la cola ${job.jobId}`);
       await cargarEstado(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo imprimir el ticket de prueba');
@@ -154,10 +158,6 @@ export function ImpresoraPOS() {
           <Button variant="outline" onClick={() => cargarEstado()} disabled={cargando}>
             <RefreshCcw className="h-4 w-4" />
             Actualizar
-          </Button>
-          <Button className="bg-slate-900 hover:bg-slate-800" onClick={probarImpresion} disabled={!conectado || probando}>
-            <Send className="h-4 w-4" />
-            Ticket de prueba
           </Button>
           <Button variant="destructive" onClick={cancelarCola} disabled={!conectado || cancelando}>
             <Ban className="h-4 w-4" />
@@ -241,6 +241,29 @@ export function ImpresoraPOS() {
               </div>
               <p className="mt-3 text-center text-xs text-slate-400">
                 Cancelados: {health?.queue.cancelled ?? 0}
+              </p>
+            </div>
+
+            <div className="rounded-lg border bg-white p-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cantidadPrueba">Tickets de prueba</Label>
+                  <Input
+                    id="cantidadPrueba"
+                    type="number"
+                    min={1}
+                    max={5000}
+                    value={cantidadPrueba}
+                    onChange={(event) => setCantidadPrueba(Number(event.target.value))}
+                  />
+                </div>
+                <Button className="bg-slate-900 hover:bg-slate-800" onClick={probarImpresion} disabled={!conectado || probando}>
+                  <Send className="h-4 w-4" />
+                  Imprimir prueba
+                </Button>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Máximo 5000 tickets por prueba. Usa cantidades pequeñas para validar una caja nueva.
               </p>
             </div>
           </CardContent>
