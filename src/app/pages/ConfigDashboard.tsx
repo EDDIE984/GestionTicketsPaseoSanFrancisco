@@ -41,7 +41,7 @@ export function ConfigDashboard() {
     },
     {
       title: 'Categorías',
-      description: 'Gestiona las categorías de eventos',
+      description: 'Gestiona las categorías',
       icon: Tag,
       path: '/configuracion/categorias',
     },

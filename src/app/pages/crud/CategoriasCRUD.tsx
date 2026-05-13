@@ -76,7 +76,7 @@ export function CategoriasCRUD() {
   return (
     <CRUDTemplate
       title="Categorías"
-      description="Gestiona las categorías de eventos"
+      description="Gestiona las categorías"
       data={categorias}
       columns={[
         { key: 'nombre', label: 'Nombre' },
