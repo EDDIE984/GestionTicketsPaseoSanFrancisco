@@ -129,9 +129,20 @@ function wrap(text, width = PAPER_CHARS) {
   let current = '';
 
   for (const word of words) {
+    if (word.length > width) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      for (let i = 0; i < word.length; i += width) {
+        lines.push(word.slice(i, i + width));
+      }
+      continue;
+    }
+
     if (`${current} ${word}`.trim().length > width) {
       if (current) lines.push(current);
-      current = word.slice(0, width);
+      current = word;
     } else {
       current = `${current} ${word}`.trim();
     }
@@ -151,7 +162,8 @@ function buildTicketBuffer(ticket) {
   parts.push(esc(0x1b, 0x45, 0x01)); // bold
   parts.push(text(center('PASEO SAN FRANCISCO')));
   parts.push(esc(0x1b, 0x45, 0x00));
-  parts.push(text(center(`Ticket #: ${ticket.ticketNumero}`)));
+  parts.push(text(center('Ticket #:')));
+  for (const row of wrap(ticket.ticketNumero)) parts.push(text(center(row)));
   parts.push(text('-'.repeat(PAPER_CHARS)));
   parts.push(esc(0x1b, 0x61, 0x00)); // left
   parts.push(text(line('Cedula', ticket.cedula)));

@@ -111,6 +111,26 @@ export interface FacturaMetodoPago {
   entregables_calculados: number;
 }
 
+export interface SaldoCliente {
+  id: string;
+  cliente_id: string;
+  evento_id: string;
+  saldo: number;
+  updated_at: string;
+}
+
+export interface HistorialSaldo {
+  id: string;
+  cliente_id: string;
+  evento_id: string;
+  factura_id: string;
+  cupon_aplicado: string | null;
+  saldo_anterior: number;
+  saldo_nuevo: number;
+  tickets_generados: number;
+  created_at: string;
+}
+
 // Vista enriquecida de factura para la pantalla de Registro
 export interface FacturaVista extends Factura {
   clientes: Cliente;

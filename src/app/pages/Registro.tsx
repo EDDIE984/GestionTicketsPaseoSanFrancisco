@@ -32,7 +32,7 @@ import { CheckCircle2, X, Printer, PlusCircle, FileStack, LoaderCircle } from 'l
 import { useAuth } from '@/app/components/AuthContext';
 import { consultarCedula } from '@/lib/api/cedula';
 import { enviarConsentimientoCliente } from '@/lib/api/consentimientos';
-import { upsertCliente } from '@/lib/api/clientes';
+import { fetchClienteByCedula, upsertCliente } from '@/lib/api/clientes';
 import {
   createFactura,
   existsFacturaByNumero,
@@ -42,6 +42,7 @@ import {
 } from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
+import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo } from '@/lib/api/saldo';
 import { checkPosPrinter, enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
 
@@ -76,9 +77,26 @@ interface FacturaPendiente {
   totalEntregables: number;
   localId: string;
   localNombre?: string;
+  cuponAplicado: string | null;
+  saldoAnterior: number;
+  saldoNuevo: number;
 }
 
 const TICKET_PAPER_CHARS = 42;
+const FACTURA_MAX_LENGTH = 17;
+const FACTURA_FORMAT_REGEX = /^\d{3}-\d{3}-\d{9}$/;
+const FACTURA_FORMAT_LABEL = '001-001-000000397';
+
+function formatearNumeroFactura(value: string) {
+  const digitos = value.replace(/\D/g, '').slice(0, 15);
+  const partes = [
+    digitos.slice(0, 3),
+    digitos.slice(3, 6),
+    digitos.slice(6, 15),
+  ].filter(Boolean);
+
+  return partes.join('-');
+}
 
 interface EventoActivo {
   id: string;
@@ -188,6 +206,22 @@ export function Registro() {
   const [mostrarDialogoTickets, setMostrarDialogoTickets] = useState(false);
   const [facturasActuales, setFacturasActuales] = useState<FacturaPendiente[]>([]);
   const [ticketsImpresos, setTicketsImpresos] = useState(false);
+  const [clienteId, setClienteId] = useState<string | null>(null);
+  const [saldoAnterior, setSaldoAnterior] = useState<number>(0);
+  const [mostrarHistorialSaldo, setMostrarHistorialSaldo] = useState(false);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+  const [historialSaldoData, setHistorialSaldoData] = useState<Array<{
+    id: string; numero_factura: string; monto_factura: number; local_nombre: string;
+    cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string;
+  }>>([]);
+  // Estados para la pestaña de consulta de saldo
+  const [cedulaConsulta, setCedulaConsulta] = useState('');
+  const [consultandoSaldo, setConsultandoSaldo] = useState(false);
+  const [resultadoSaldo, setResultadoSaldo] = useState<{
+    cliente: { nombre: string; apellido: string; cedula: string } | null;
+    saldos: Array<{ evento_id: string; evento_nombre: string; saldo: number; updated_at: string }>;
+    historial: Array<{ id: string; evento_nombre: string; numero_factura: string; monto_factura: number; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string }>;
+  } | null>(null);
 
   const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion;
   const mensajeProceso = guardandoFacturas
@@ -216,6 +250,17 @@ export function Registro() {
     return Math.max(totalFactura - calcularTotalMetodos(), 0);
   };
 
+  const calcularSaldoAGenerar = () => {
+    if (metodosPago.length === 0) return null;
+    const valorMinimo = eventosActivos.find((e) => e.id === eventoId)?.valor_minimo;
+    if (!valorMinimo || valorMinimo <= 0) return null;
+    const primerMonto = metodosPago[0]?.monto ?? 0;
+    return parseFloat((
+      (primerMonto + saldoAnterior) % valorMinimo +
+      metodosPago.slice(1).reduce((acc, m) => acc + (m.monto % valorMinimo), 0)
+    ).toFixed(2));
+  };
+
   useEffect(() => {
     const saldoPendiente = calcularSaldoPendiente();
     setMontoMetodo(saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '');
@@ -229,6 +274,16 @@ export function Registro() {
       setCuponSeleccionado('');
     }
   }, [eventoId, eventosActivos, cuponSeleccionado]);
+
+  useEffect(() => {
+    if (!clienteId || !eventoId) {
+      setSaldoAnterior(0);
+      return;
+    }
+    fetchSaldoCliente(clienteId, eventoId)
+      .then(setSaldoAnterior)
+      .catch(() => setSaldoAnterior(0));
+  }, [clienteId, eventoId]);
 
   const validarEventoVigente = (evento?: EventoActivo) => {
     if (!evento) return 'Debes seleccionar un evento válido';
@@ -252,10 +307,6 @@ export function Registro() {
     const errorVigencia = validarEventoVigente(evento);
     if (errorVigencia) return errorVigencia;
     if (!evento) return 'Debes seleccionar un evento válido';
-
-    if (monto < evento.valor_minimo) {
-      return `El monto debe ser igual o mayor al valor mínimo del evento ($${evento.valor_minimo.toFixed(2)})`;
-    }
 
     if (evento.valor_maximo > 0 && monto > evento.valor_maximo) {
       return `El monto no puede superar el valor máximo por factura del evento ($${evento.valor_maximo.toFixed(2)})`;
@@ -321,8 +372,10 @@ export function Registro() {
     cuponNombre = cupon.nombre;
     cuponId = cupon.id;
 
-    // Calcular entregables: Math.floor(monto_método / valor_mínimo_campaña) × multiplicador_cupón
-    const entregablesBase = Math.floor(monto / valorMinimo);
+    // Calcular entregables: el saldo acumulado se suma al primer método de pago
+    const esPrimerMetodo = metodosPago.length === 0;
+    const montoEfectivo = esPrimerMetodo ? monto + saldoAnterior : monto;
+    const entregablesBase = Math.floor(montoEfectivo / valorMinimo);
     const entregablesCalculados = entregablesBase * cuponNumero;
 
     setMetodosPago([
@@ -346,6 +399,14 @@ export function Registro() {
     setMetodosPago(metodosPago.filter((_, i) => i !== index));
   };
 
+  const obtenerCuponAplicado = (metodos: MetodoPagoLocal[]) => {
+    const cupones = metodos
+      .map((metodo) => metodo.cuponNombre?.trim())
+      .filter((cupon): cupon is string => Boolean(cupon));
+
+    return cupones.length ? Array.from(new Set(cupones)).join(', ') : null;
+  };
+
   // Limpiar solo los campos de factura y métodos de pago (eventoId NO se limpia)
   const limpiarFactura = () => {
     setNumeroFactura('');
@@ -367,6 +428,8 @@ export function Registro() {
     setCorreo('');
     setGenero('');
     setUltimaCedulaConsultada('');
+    setClienteId(null);
+    setSaldoAnterior(0);
     setEventoId('');
     limpiarFactura();
   };
@@ -397,12 +460,32 @@ export function Registro() {
       .join(', ');
   };
 
+  const cargarClienteGuardado = async (cedulaLimpia: string) => {
+    const cliente = await fetchClienteByCedula(cedulaLimpia);
+    if (!cliente) return false;
+
+    setCedula(cliente.cedula);
+    setNombre(cliente.nombre);
+    setApellido(cliente.apellido);
+    setDireccion(cliente.direccion ?? '');
+    setTelefono(cliente.telefono ?? '');
+    setCorreo(cliente.correo ?? '');
+    setGenero(cliente.genero ?? '');
+    setClienteId(cliente.id);
+    setUltimaCedulaConsultada(cedulaLimpia);
+    toast.success('Cliente cargado desde la base');
+    return true;
+  };
+
   const consultarDatosCedula = async () => {
     const cedulaLimpia = cedula.trim();
     if (!cedulaLimpia || cedulaLimpia === ultimaCedulaConsultada) return;
 
     setConsultandoCedula(true);
     try {
+      const clienteExiste = await cargarClienteGuardado(cedulaLimpia);
+      if (clienteExiste) return;
+
       const datos = await consultarCedula(cedulaLimpia);
       if (!datos?.cedula && !datos?.nombre) {
         toast.error('No se encontró información para la cédula ingresada');
@@ -435,6 +518,9 @@ export function Registro() {
   const validarNumeroFacturaDisponible = async (numero: string) => {
     const numeroLimpio = numero.trim();
     if (!numeroLimpio) return 'Ingresa el número de factura';
+    if (!FACTURA_FORMAT_REGEX.test(numeroLimpio)) {
+      return `La factura debe tener el formato ${FACTURA_FORMAT_LABEL}`;
+    }
 
     const duplicadaPendiente = facturasPendientes.some(
       (factura) => factura.numeroFactura.trim() === numeroLimpio
@@ -497,6 +583,14 @@ export function Registro() {
     const eventoNombre = eventoSeleccionado?.nombre || '';
     const eventoValorMinimo = eventoSeleccionado?.valor_minimo || 0;
     const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
+
+    const eventoValorMinimoLocal = eventoSeleccionado?.valor_minimo ?? 1;
+    const primerMonto = metodosPago[0]?.monto ?? 0;
+    const nuevoSaldo = parseFloat((
+      (primerMonto + saldoAnterior) % eventoValorMinimoLocal +
+      metodosPago.slice(1).reduce((acc, m) => acc + (m.monto % eventoValorMinimoLocal), 0)
+    ).toFixed(2));
+
     const nuevaFactura: FacturaPendiente = {
       id: Date.now() + Math.floor(Math.random() * 10000),
       eventoNombre,
@@ -516,8 +610,12 @@ export function Registro() {
       fechaEmision,
       metodosPago: [...metodosPago],
       totalEntregables: metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0),
+      cuponAplicado: obtenerCuponAplicado(metodosPago),
+      saldoAnterior,
+      saldoNuevo: nuevoSaldo,
     };
     setFacturasPendientes([nuevaFactura, ...facturasPendientes]);
+    setSaldoAnterior(nuevoSaldo);
     limpiarFactura();
   };
 
@@ -583,6 +681,22 @@ export function Registro() {
             entregables_calculados: m.entregablesCalculados ?? 0,
           }))
         );
+
+        // 3. Registrar movimiento de saldo (se guarda aquí, independiente de la impresión)
+        try {
+          await registrarMovimientoSaldo({
+            clienteId: cliente.id,
+            eventoId: fp.eventoId,
+            facturaId: factura.id,
+            cuponAplicado: fp.cuponAplicado,
+            saldoAnterior: fp.saldoAnterior,
+            saldoNuevo: fp.saldoNuevo,
+            ticketsGenerados: fp.totalEntregables,
+          });
+        } catch (saldoError) {
+          console.error('No se pudo registrar el movimiento de saldo', saldoError);
+          toast.warning('Factura registrada, pero no se pudo guardar el saldo. Verifica que las tablas de saldo existen en Supabase.');
+        }
 
         const facturaIds = consentimientosPendientes.get(cliente.id) ?? [];
         facturaIds.push(factura.id);
@@ -678,9 +792,20 @@ export function Registro() {
     let current = '';
 
     for (const word of words) {
+      if (word.length > width) {
+        if (current) {
+          lines.push(current);
+          current = '';
+        }
+        for (let i = 0; i < word.length; i += width) {
+          lines.push(word.slice(i, i + width));
+        }
+        continue;
+      }
+
       if (`${current} ${word}`.trim().length > width) {
         if (current) lines.push(current);
-        current = word.slice(0, width);
+        current = word;
       } else {
         current = `${current} ${word}`.trim();
       }
@@ -690,9 +815,13 @@ export function Registro() {
     return lines.length ? lines : [''];
   };
 
+  const centrarLineasTicket = (value: string) =>
+    envolverLineaTicket(value).map((linea) => centrarLineaTicket(linea));
+
   const construirLineasPreviewTicket = (ticket: PosTicket) => [
     centrarLineaTicket('PASEO SAN FRANCISCO'),
-    centrarLineaTicket(`Ticket #: ${ticket.ticketNumero}`),
+    ...centrarLineasTicket('Ticket #:'),
+    ...centrarLineasTicket(ticket.ticketNumero),
     '-'.repeat(TICKET_PAPER_CHARS),
     `Cedula: ${normalizarTextoTicket(ticket.cedula)}`,
     ...envolverLineaTicket(`Nombre: ${ticket.nombre}`),
@@ -743,6 +872,40 @@ export function Registro() {
     }
   };
 
+  const abrirHistorialSaldo = async () => {
+    if (!clienteId || !eventoId) return;
+    setMostrarHistorialSaldo(true);
+    setCargandoHistorial(true);
+    try {
+      const historial = await fetchHistorialSaldoEvento(clienteId, eventoId);
+      setHistorialSaldoData(historial);
+    } catch {
+      toast.error('No se pudo cargar el historial de saldo');
+    } finally {
+      setCargandoHistorial(false);
+    }
+  };
+
+  const consultarSaldoCliente = async () => {
+    const cedulaLimpia = cedulaConsulta.trim();
+    if (!cedulaLimpia) return;
+    setConsultandoSaldo(true);
+    setResultadoSaldo(null);
+    try {
+      const cliente = await fetchClienteByCedula(cedulaLimpia);
+      if (!cliente) {
+        toast.error('No se encontró un cliente con esa cédula');
+        return;
+      }
+      const { saldos, historial } = await fetchSaldoPorCliente(cliente.id);
+      setResultadoSaldo({ cliente, saldos, historial });
+    } catch {
+      toast.error('No se pudo consultar el saldo');
+    } finally {
+      setConsultandoSaldo(false);
+    }
+  };
+
   // Facturas del día vienen de Supabase (ya filtradas por fecha)
   const facturasDelDia = facturas;
 
@@ -770,9 +933,10 @@ export function Registro() {
       </div>
 
       <Tabs defaultValue="registro" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="registro">Registro</TabsTrigger>
           <TabsTrigger value="facturas">Facturas del Día ({facturasDelDia.length})</TabsTrigger>
+          <TabsTrigger value="saldo">Consulta de Saldo</TabsTrigger>
         </TabsList>
 
         <TabsContent value="registro" className="mt-6">
@@ -902,8 +1066,10 @@ export function Registro() {
                     <Input
                       id="numeroFactura"
                       value={numeroFactura}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNumeroFactura(e.target.value)}
-                      placeholder="001-001-0000001"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNumeroFactura(formatearNumeroFactura(e.target.value))}
+                      placeholder={FACTURA_FORMAT_LABEL}
+                      inputMode="numeric"
+                      maxLength={FACTURA_MAX_LENGTH}
                     />
                   </div>
 
@@ -933,6 +1099,28 @@ export function Registro() {
 
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold mb-4">Métodos de Pago</h3>
+
+                {clienteId && eventoId && (
+                  <div className="flex items-center justify-between rounded-md bg-amber-50 border border-amber-200 px-4 py-3 mb-4">
+                    <div className="flex items-center gap-3 text-sm">
+                      <div>
+                        <span className="text-amber-700 text-xs uppercase tracking-wide font-medium">Saldo acumulado</span>
+                        <p className="text-2xl font-bold text-amber-800 tabular-nums leading-tight">${saldoAnterior.toFixed(2)}</p>
+                      </div>
+                      {saldoAnterior > 0 && (
+                        <span className="text-amber-600 text-xs">Se aplicará al primer método de pago</span>
+                      )}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-amber-700 border-amber-300 hover:bg-amber-100 shrink-0"
+                      onClick={abrirHistorialSaldo}
+                    >
+                      Ver historial
+                    </Button>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div>
@@ -1009,6 +1197,11 @@ export function Registro() {
                           <div className="flex items-center gap-4 flex-wrap">
                             <span className="font-medium">{metodo.nombre}</span>
                             <span className="text-gray-600">${metodo.monto.toFixed(2)}</span>
+                            {index === 0 && saldoAnterior > 0 && (
+                              <span className="text-xs text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                + ${saldoAnterior.toFixed(2)} saldo
+                              </span>
+                            )}
                             {metodo.cuponNombre && (
                               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
                                 {metodo.cuponNombre} (x{metodo.cuponNumero})
@@ -1041,6 +1234,16 @@ export function Registro() {
                           {metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0)}
                         </span>
                       </div>
+                      {(() => {
+                        const saldoAGenerar = calcularSaldoAGenerar();
+                        if (saldoAGenerar === null) return null;
+                        return (
+                          <div className="flex justify-between items-center">
+                            <span className="font-semibold text-amber-700">Saldo a acumular:</span>
+                            <span className="text-lg font-bold text-amber-600">${saldoAGenerar.toFixed(2)}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1091,8 +1294,8 @@ export function Registro() {
                             <TableCell>{factura.eventoNombre}</TableCell>
                             <TableCell>{factura.cedula}</TableCell>
                             <TableCell>{factura.nombre} {factura.apellido}</TableCell>
-                            <TableCell>{factura.numeroFactura}</TableCell>
-                            <TableCell>${factura.montoTotal.toFixed(2)}</TableCell>
+                            <TableCell className="max-w-36 whitespace-normal break-all font-medium">{factura.numeroFactura}</TableCell>
+                            <TableCell className="font-semibold tabular-nums">${factura.montoTotal.toFixed(2)}</TableCell>
                             <TableCell>{factura.totalEntregables}</TableCell>
                             <TableCell>{factura.fechaEmision}</TableCell>
                             <TableCell>
@@ -1176,8 +1379,8 @@ export function Registro() {
                               {factura.clientes?.genero}
                             </Badge>
                           </TableCell>
-                          <TableCell>{factura.numero_factura}</TableCell>
-                          <TableCell className="font-semibold">
+                          <TableCell className="max-w-36 whitespace-normal break-all font-medium">{factura.numero_factura}</TableCell>
+                          <TableCell className="font-semibold tabular-nums">
                             ${factura.monto_total.toFixed(2)}
                           </TableCell>
                           <TableCell>
@@ -1215,7 +1418,164 @@ export function Registro() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="saldo" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Consulta de Saldo por Cliente</CardTitle>
+              <CardDescription>Ingresa la cédula para ver el saldo acumulado e historial de movimientos por campaña</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-2 max-w-sm mb-6">
+                <Input
+                  placeholder="Número de cédula"
+                  value={cedulaConsulta}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCedulaConsulta(e.target.value)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && consultarSaldoCliente()}
+                />
+                <Button onClick={consultarSaldoCliente} disabled={consultandoSaldo}>
+                  {consultandoSaldo ? <LoaderCircle className="h-4 w-4 animate-spin" /> : 'Consultar'}
+                </Button>
+              </div>
+
+              {resultadoSaldo && (
+                <div className="space-y-6">
+                  <div className="rounded-lg border p-4 bg-gray-50">
+                    <p className="font-semibold text-lg">{resultadoSaldo.cliente?.nombre} {resultadoSaldo.cliente?.apellido}</p>
+                    <p className="text-sm text-gray-500">Cédula: {resultadoSaldo.cliente?.cedula}</p>
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold mb-3">Saldo actual por campaña</h3>
+                    {resultadoSaldo.saldos.length === 0 ? (
+                      <p className="text-sm text-gray-500">Sin saldo registrado en ninguna campaña</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {resultadoSaldo.saldos.map((s) => (
+                          <div key={s.evento_id} className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex justify-between items-center">
+                            <div>
+                              <p className="font-medium text-amber-900">{s.evento_nombre}</p>
+                              <p className="text-xs text-amber-700">Actualizado: {new Date(s.updated_at).toLocaleString('es-EC')}</p>
+                            </div>
+                            <p className="text-2xl font-bold text-amber-800 tabular-nums">${Number(s.saldo).toFixed(2)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold mb-3">Historial de movimientos</h3>
+                    {resultadoSaldo.historial.length === 0 ? (
+                      <p className="text-sm text-gray-500">Sin historial</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <Table className="w-full" style={{ minWidth: '1180px' }}>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Fecha</TableHead>
+                              <TableHead>Campaña</TableHead>
+                              <TableHead>No. Factura</TableHead>
+                              <TableHead>Cupón</TableHead>
+                              <TableHead className="text-right">Monto Factura</TableHead>
+                              <TableHead className="text-right">Saldo Anterior</TableHead>
+                              <TableHead className="text-right">Saldo Nuevo</TableHead>
+                              <TableHead className="text-right">Variación</TableHead>
+                              <TableHead className="text-right">Tickets</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {resultadoSaldo.historial.map((h) => {
+                              const variacion = h.saldo_nuevo - h.saldo_anterior;
+                              return (
+                                <TableRow key={h.id}>
+                                  <TableCell className="text-sm">{new Date(h.created_at).toLocaleString('es-EC')}</TableCell>
+                                  <TableCell className="text-sm">{h.evento_nombre}</TableCell>
+                                  <TableCell className="text-sm font-mono">{h.numero_factura}</TableCell>
+                                  <TableCell className="text-sm">{h.cupon_aplicado ?? '—'}</TableCell>
+                                  <TableCell className="text-right tabular-nums">${Number(h.monto_factura).toFixed(2)}</TableCell>
+                                  <TableCell className="text-right tabular-nums">${Number(h.saldo_anterior).toFixed(2)}</TableCell>
+                                  <TableCell className="text-right tabular-nums font-semibold">${Number(h.saldo_nuevo).toFixed(2)}</TableCell>
+                                  <TableCell className={`text-right tabular-nums font-medium ${variacion >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {variacion >= 0 ? '+' : ''}{variacion.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums">{h.tickets_generados}</TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {/* Diálogo de Historial de Saldo */}
+      <Dialog open={mostrarHistorialSaldo} onOpenChange={setMostrarHistorialSaldo}>
+        <DialogContent className="w-[96vw] !max-w-[1200px] sm:!max-w-[1200px] max-h-[85vh] flex flex-col p-0 gap-0">
+          <div className="px-6 pt-6 pb-4 border-b shrink-0">
+            <h2 className="text-lg font-semibold leading-tight">Historial de Saldo — {nombre} {apellido}</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              {eventosActivos.find((e) => e.id === eventoId)?.nombre ?? ''} · Saldo actual:
+              <span className="font-bold text-amber-700 ml-1">${saldoAnterior.toFixed(2)}</span>
+            </p>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto p-6 pt-4">
+            {cargandoHistorial ? (
+              <div className="flex items-center justify-center py-12 gap-3 text-gray-500">
+                <LoaderCircle className="h-5 w-5 animate-spin" />
+                <span>Cargando historial...</span>
+              </div>
+            ) : historialSaldoData.length === 0 ? (
+              <div className="text-center py-12 text-gray-500 text-sm">
+                No hay transacciones previas con saldo para esta campaña.
+              </div>
+            ) : (
+              <Table className="w-full" style={{ minWidth: '1240px' }}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="whitespace-nowrap">Fecha</TableHead>
+                    <TableHead className="whitespace-nowrap">No. Factura</TableHead>
+                    <TableHead className="whitespace-nowrap">Local</TableHead>
+                    <TableHead className="whitespace-nowrap">Cupón</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Monto</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Saldo Anterior</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Saldo Nuevo</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Variación</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Tickets</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {historialSaldoData.map((h) => {
+                    const variacion = h.saldo_nuevo - h.saldo_anterior;
+                    return (
+                      <TableRow key={h.id}>
+                        <TableCell className="text-sm whitespace-nowrap">{new Date(h.created_at).toLocaleString('es-EC')}</TableCell>
+                        <TableCell className="font-mono text-sm whitespace-nowrap">{h.numero_factura}</TableCell>
+                        <TableCell className="text-sm whitespace-nowrap">{h.local_nombre}</TableCell>
+                        <TableCell className="text-sm whitespace-nowrap">{h.cupon_aplicado ?? '—'}</TableCell>
+                        <TableCell className="text-right tabular-nums whitespace-nowrap">${Number(h.monto_factura).toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums whitespace-nowrap">${Number(h.saldo_anterior).toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-semibold whitespace-nowrap">${Number(h.saldo_nuevo).toFixed(2)}</TableCell>
+                        <TableCell className={`text-right tabular-nums font-medium whitespace-nowrap ${variacion >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {variacion >= 0 ? '+' : ''}{variacion.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums whitespace-nowrap">{h.tickets_generados}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Diálogo de Tickets */}
       <Dialog open={mostrarDialogoTickets} onOpenChange={setMostrarDialogoTickets}>
@@ -1237,43 +1597,72 @@ export function Registro() {
                     <div key={facturaActual.id}>
                       <div className="bg-gray-50 border rounded-lg p-4 mb-4">
                         <h3 className="font-semibold mb-3">Resumen de Factura</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                          <div>
+                        <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1.1fr)_max-content]">
+                          <div className="min-w-0">
                             <span className="text-gray-600">Evento:</span>
-                            <p className="font-medium">{facturaActual.eventoNombre}</p>
+                            <p className="font-medium break-words">{facturaActual.eventoNombre}</p>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <span className="text-gray-600">Cliente:</span>
-                            <p className="font-medium">{facturaActual.nombre} {facturaActual.apellido}</p>
+                            <p className="font-medium break-words">{facturaActual.nombre} {facturaActual.apellido}</p>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <span className="text-gray-600">No. Factura:</span>
-                            <p className="font-medium">{facturaActual.numeroFactura}</p>
+                            <p className="font-medium break-all">{facturaActual.numeroFactura}</p>
                           </div>
-                          <div>
+                          <div className="min-w-0 lg:text-right">
                             <span className="text-gray-600">Monto Total:</span>
-                            <p className="font-medium">${facturaActual.montoTotal.toFixed(2)}</p>
+                            <p className="font-medium tabular-nums">${facturaActual.montoTotal.toFixed(2)}</p>
                           </div>
                         </div>
                       </div>
+
+                      {(facturaActual.saldoAnterior > 0 || facturaActual.saldoNuevo > 0) && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm">
+                          <h4 className="font-semibold text-amber-800 mb-2">Saldo Acumulado</h4>
+                          <div className="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                              <p className="text-amber-700 text-xs uppercase tracking-wide">Saldo anterior</p>
+                              <p className="font-bold text-amber-900 tabular-nums">${facturaActual.saldoAnterior.toFixed(2)}</p>
+                            </div>
+                            <div>
+                              <p className="text-amber-700 text-xs uppercase tracking-wide">Monto efectivo (1er método)</p>
+                              <p className="font-bold text-amber-900 tabular-nums">
+                                ${((facturaActual.metodosPago[0]?.monto ?? 0) + facturaActual.saldoAnterior).toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-amber-700 text-xs uppercase tracking-wide">Nuevo saldo</p>
+                              <p className="font-bold text-amber-900 tabular-nums">${facturaActual.saldoNuevo.toFixed(2)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <div>
                         <h3 className="font-semibold mb-4">Tickets de Entrega</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {Array.from({ length: facturaActual.totalEntregables }).map((_, index) => {
-                            const ticket = construirTicketPos(facturaActual, index, facturaActual.totalEntregables);
-                            const previewLines = construirLineasPreviewTicket(ticket);
-                            return (
-                              <div
-                                key={index}
-                                className="overflow-hidden rounded-md border border-slate-300 bg-slate-100 p-3 shadow-sm transition-shadow hover:shadow-md print:break-inside-avoid"
-                              >
-                                <div className="mx-auto w-full max-w-[310px] bg-white px-4 py-5 text-slate-950 shadow-inner">
-                                  <pre className="m-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-5 tracking-normal">{previewLines.join('\n')}</pre>
+                        {facturaActual.totalEntregables === 0 ? (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                            Esta factura no generó tickets — el monto se acumuló como saldo para la próxima visita.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {Array.from({ length: facturaActual.totalEntregables }).map((_, index) => {
+                              const ticket = construirTicketPos(facturaActual, index, facturaActual.totalEntregables);
+                              const previewLines = construirLineasPreviewTicket(ticket);
+                              return (
+                                <div
+                                  key={index}
+                                  className="overflow-hidden rounded-md border border-slate-300 bg-slate-100 p-3 shadow-sm transition-shadow hover:shadow-md print:break-inside-avoid"
+                                >
+                                  <div className="mx-auto w-full max-w-[310px] bg-white px-4 py-5 text-slate-950 shadow-inner">
+                                    <pre className="m-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-5 tracking-normal">{previewLines.join('\n')}</pre>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1287,7 +1676,11 @@ export function Registro() {
                   onClick={imprimirTickets}
                   size="lg"
                   className="bg-blue-600 hover:bg-blue-700"
-                  disabled={ticketsImpresos || marcandoImpresion}
+                  disabled={
+                    ticketsImpresos ||
+                    marcandoImpresion ||
+                    facturasActuales.every((f) => f.totalEntregables === 0)
+                  }
                 >
                   {marcandoImpresion ? (
                     <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
