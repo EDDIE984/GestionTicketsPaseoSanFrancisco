@@ -132,13 +132,14 @@ CREATE TABLE facturas (
   cliente_id        UUID NOT NULL REFERENCES clientes(id),
   local_id          UUID NOT NULL REFERENCES locales(id),
   usuario_id        UUID NOT NULL REFERENCES usuarios(id),
-  numero_factura    TEXT UNIQUE NOT NULL,
+  numero_factura    TEXT NOT NULL,
   monto_total       NUMERIC(10,2) NOT NULL,
   fecha_emision     DATE NOT NULL,
   total_entregables INTEGER NOT NULL DEFAULT 0,
   tickets_impresos  BOOLEAN NOT NULL DEFAULT false,
   tickets_impresos_at TIMESTAMPTZ,
-  fecha_registro    TIMESTAMPTZ NOT NULL DEFAULT now()
+  fecha_registro    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT facturas_numero_factura_local_evento_unique UNIQUE (numero_factura, local_id, evento_id)
 );
 
 CREATE TABLE factura_metodos_pago (

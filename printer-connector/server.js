@@ -170,7 +170,6 @@ function buildTicketBuffer(ticket) {
   for (const row of wrap(line('Nombre', ticket.nombre))) parts.push(text(row));
   parts.push(text(line('Telefono', ticket.telefono)));
   parts.push(text(line('Fecha/Hora', ticket.fechaHora)));
-  for (const row of wrap(line('Local', ticket.local))) parts.push(text(row));
   parts.push(text('-'.repeat(PAPER_CHARS)));
   parts.push(esc(0x1b, 0x61, 0x01));
   parts.push(text(center(`${ticket.index} de ${ticket.total}`)));

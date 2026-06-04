@@ -50,11 +50,43 @@ export async function marcarFacturasComoImpresas(facturaIds: string[]): Promise<
   if (error) throw error;
 }
 
-export async function existsFacturaByNumero(numeroFactura: string): Promise<boolean> {
+export async function reversarFacturasRegistro(params: {
+  facturaIds: string[];
+  usuarioId: string;
+  motivo?: string;
+}): Promise<{
+  reverso_id: string;
+  facturas_reversadas: number;
+  numeros_factura: string[];
+}> {
+  const { facturaIds, usuarioId, motivo } = params;
+  if (facturaIds.length === 0) throw new Error('No hay facturas para reversar');
+
+  const { data, error } = await supabase.rpc('reversar_facturas_registro', {
+    p_factura_ids: facturaIds,
+    p_usuario_id: usuarioId,
+    p_motivo: motivo?.trim() || null,
+  });
+
+  if (error) throw error;
+  return data as {
+    reverso_id: string;
+    facturas_reversadas: number;
+    numeros_factura: string[];
+  };
+}
+
+export async function existsFacturaByNumero(
+  numeroFactura: string,
+  localId: string,
+  eventoId: string
+): Promise<boolean> {
   const { data, error } = await supabase
     .from('facturas')
     .select('id')
     .eq('numero_factura', numeroFactura)
+    .eq('local_id', localId)
+    .eq('evento_id', eventoId)
     .maybeSingle();
 
   if (error) throw error;

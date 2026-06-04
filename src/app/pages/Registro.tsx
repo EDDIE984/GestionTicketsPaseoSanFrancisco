@@ -26,9 +26,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/app/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/app/components/ui/alert-dialog';
+import { Textarea } from '@/app/components/ui/textarea';
 import { Badge } from '@/app/components/ui/badge';
 import { toast } from 'sonner';
-import { CheckCircle2, X, Printer, PlusCircle, FileStack, LoaderCircle } from 'lucide-react';
+import { CheckCircle2, X, Printer, PlusCircle, FileStack, LoaderCircle, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/app/components/AuthContext';
 import { consultarCedula } from '@/lib/api/cedula';
 import { enviarConsentimientoCliente } from '@/lib/api/consentimientos';
@@ -39,6 +49,7 @@ import {
   fetchFacturasDelDia,
   fetchEventosActivos,
   marcarFacturasComoImpresas,
+  reversarFacturasRegistro,
 } from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
@@ -184,6 +195,7 @@ export function Registro() {
   const [guardandoFacturas, setGuardandoFacturas] = useState(false);
   const [validandoFactura, setValidandoFactura] = useState(false);
   const [marcandoImpresion, setMarcandoImpresion] = useState(false);
+  const [reversandoRegistro, setReversandoRegistro] = useState(false);
   // Estado de la factura actual
   const [localId, setLocalId] = useState('');
   const [eventoId, setEventoId] = useState('');
@@ -206,6 +218,8 @@ export function Registro() {
   const [mostrarDialogoTickets, setMostrarDialogoTickets] = useState(false);
   const [facturasActuales, setFacturasActuales] = useState<FacturaPendiente[]>([]);
   const [ticketsImpresos, setTicketsImpresos] = useState(false);
+  const [mostrarConfirmacionReverso, setMostrarConfirmacionReverso] = useState(false);
+  const [motivoReverso, setMotivoReverso] = useState('');
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [saldoAnterior, setSaldoAnterior] = useState<number>(0);
   const [mostrarHistorialSaldo, setMostrarHistorialSaldo] = useState(false);
@@ -223,7 +237,7 @@ export function Registro() {
     historial: Array<{ id: string; evento_nombre: string; numero_factura: string; monto_factura: number; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string }>;
   } | null>(null);
 
-  const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion;
+  const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion || reversandoRegistro;
   const mensajeProceso = guardandoFacturas
     ? 'Registrando facturas...'
     : consultandoCedula
@@ -232,7 +246,9 @@ export function Registro() {
         ? 'Validando factura...'
         : marcandoImpresion
           ? 'Marcando tickets como impresos...'
-          : 'Cargando información...';
+          : reversandoRegistro
+            ? 'Reversando registro...'
+            : 'Cargando información...';
 
   const calcularTotalMetodos = () => {
     return metodosPago.reduce((sum, m) => sum + m.monto, 0);
@@ -523,15 +539,18 @@ export function Registro() {
     }
 
     const duplicadaPendiente = facturasPendientes.some(
-      (factura) => factura.numeroFactura.trim() === numeroLimpio
+      (factura) =>
+        factura.numeroFactura.trim() === numeroLimpio &&
+        factura.localId === localId &&
+        factura.eventoId === eventoId
     );
     if (duplicadaPendiente) {
-      return `La factura ${numeroLimpio} ya está en la lista pendiente`;
+      return `La factura ${numeroLimpio} ya está en la lista pendiente para este local y campaña`;
     }
 
-    const existeEnBase = await existsFacturaByNumero(numeroLimpio);
+    const existeEnBase = await existsFacturaByNumero(numeroLimpio, localId, eventoId);
     if (existeEnBase) {
-      return `La factura ${numeroLimpio} ya fue registrada y ya emitió cupones`;
+      return `La factura ${numeroLimpio} ya fue registrada por este local en esta campaña`;
     }
 
     return null;
@@ -632,16 +651,17 @@ export function Registro() {
 
     setGuardandoFacturas(true);
     try {
-      const numeros = facturasPendientes.map((factura) => factura.numeroFactura.trim());
-      const numeroDuplicado = numeros.find((numero, index) => numeros.indexOf(numero) !== index);
-      if (numeroDuplicado) {
-        toast.error(`La factura ${numeroDuplicado} está repetida en la lista pendiente`);
+      const claves = facturasPendientes.map((f) => `${f.numeroFactura.trim()}|${f.localId}|${f.eventoId}`);
+      const claveDuplicada = claves.find((clave, i) => claves.indexOf(clave) !== i);
+      if (claveDuplicada) {
+        const numero = claveDuplicada.split('|')[0];
+        toast.error(`La factura ${numero} está repetida para el mismo local y campaña`);
         return;
       }
 
-      for (const numero of numeros) {
-        if (await existsFacturaByNumero(numero)) {
-          toast.error(`La factura ${numero} ya fue registrada y ya emitió cupones`);
+      for (const fp of facturasPendientes) {
+        if (await existsFacturaByNumero(fp.numeroFactura.trim(), fp.localId, fp.eventoId)) {
+          toast.error(`La factura ${fp.numeroFactura} ya fue registrada por este local en esta campaña`);
           return;
         }
       }
@@ -869,6 +889,48 @@ export function Registro() {
       toast.error(error instanceof Error ? error.message : 'No se pudo enviar los tickets a impresión');
     } finally {
       setMarcandoImpresion(false);
+    }
+  };
+
+  const reversarRegistroActual = async () => {
+    if (!user) {
+      toast.error('Debes iniciar sesión para reversar el registro');
+      return;
+    }
+    if (ticketsImpresos) {
+      toast.error('No se puede reversar porque los tickets ya fueron impresos');
+      return;
+    }
+
+    const facturaIds = facturasActuales
+      .map((factura) => factura.facturaId)
+      .filter((id): id is string => Boolean(id));
+
+    if (facturaIds.length !== facturasActuales.length) {
+      toast.error('No se pudo identificar todas las facturas para reversar');
+      return;
+    }
+
+    setReversandoRegistro(true);
+    try {
+      const result = await reversarFacturasRegistro({
+        facturaIds,
+        usuarioId: user.id,
+        motivo: motivoReverso,
+      });
+      const actualizadas = await fetchFacturasDelDia();
+      setFacturas(actualizadas);
+      setFacturasActuales([]);
+      setMostrarDialogoTickets(false);
+      setMostrarConfirmacionReverso(false);
+      setMotivoReverso('');
+      setTicketsImpresos(false);
+      toast.success(`Registro reversado correctamente (${result.facturas_reversadas} factura${result.facturas_reversadas === 1 ? '' : 's'})`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo reversar el registro';
+      toast.error(message);
+    } finally {
+      setReversandoRegistro(false);
     }
   };
 
@@ -1673,12 +1735,27 @@ export function Registro() {
                   Cerrar
                 </Button>
                 <Button
+                  variant="outline"
+                  onClick={() => setMostrarConfirmacionReverso(true)}
+                  size="lg"
+                  className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  disabled={ticketsImpresos || marcandoImpresion || reversandoRegistro}
+                >
+                  {reversandoRegistro ? (
+                    <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-5 h-5 mr-2" />
+                  )}
+                  Reversar registro
+                </Button>
+                <Button
                   onClick={imprimirTickets}
                   size="lg"
                   className="bg-blue-600 hover:bg-blue-700"
                   disabled={
                     ticketsImpresos ||
                     marcandoImpresion ||
+                    reversandoRegistro ||
                     facturasActuales.every((f) => f.totalEntregables === 0)
                   }
                 >
@@ -1694,6 +1771,39 @@ export function Registro() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={mostrarConfirmacionReverso} onOpenChange={setMostrarConfirmacionReverso}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reversar registro</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminarán las facturas recién registradas, sus métodos de pago y los movimientos de saldo asociados. El saldo del cliente volverá al valor anterior al registro.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="motivoReverso">Motivo del reverso</Label>
+            <Textarea
+              id="motivoReverso"
+              value={motivoReverso}
+              onChange={(event) => setMotivoReverso(event.target.value)}
+              placeholder="Ejemplo: error en número de factura o monto registrado"
+              disabled={reversandoRegistro}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reversandoRegistro}>Cancelar</AlertDialogCancel>
+            <Button
+              type="button"
+              className="bg-red-600 hover:bg-red-700"
+              onClick={reversarRegistroActual}
+              disabled={reversandoRegistro}
+            >
+              {reversandoRegistro && <LoaderCircle className="w-4 h-4 mr-2 animate-spin" />}
+              Confirmar reverso
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
