@@ -789,7 +789,6 @@ export function Registro() {
     nombre: `${factura.nombre} ${factura.apellido}`.trim(),
     telefono: factura.telefono,
     fechaHora: formatearFechaHoraRegistro(factura.fechaRegistro),
-    local: factura.localNombre || '—',
     index: indice + 1,
     total,
   });
@@ -847,7 +846,6 @@ export function Registro() {
     ...envolverLineaTicket(`Nombre: ${ticket.nombre}`),
     `Telefono: ${normalizarTextoTicket(ticket.telefono)}`,
     `Fecha/Hora: ${normalizarTextoTicket(ticket.fechaHora)}`,
-    ...envolverLineaTicket(`Local: ${ticket.local}`),
     '-'.repeat(TICKET_PAPER_CHARS),
     centrarLineaTicket(`${ticket.index} de ${ticket.total}`),
   ];

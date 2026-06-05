@@ -55,7 +55,6 @@ const tickets = Array.from({ length: count }, (_, index) => ({
   nombre: 'PRUEBA CARGA IMPRESION',
   telefono: '0999999999',
   fechaHora: now,
-  local: 'PRUEBA MASIVA',
 }));
 
 console.log(`Enviando ${count} tickets a ${printerUrl}...`);

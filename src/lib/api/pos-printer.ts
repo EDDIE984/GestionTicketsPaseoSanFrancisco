@@ -4,7 +4,6 @@ export interface PosTicket {
   nombre: string;
   telefono: string;
   fechaHora: string;
-  local: string;
   index?: number;
   total?: number;
 }
@@ -141,7 +140,6 @@ export async function imprimirTicketPrueba(cantidad = 1) {
         dateStyle: 'short',
         timeStyle: 'medium',
       }),
-      local: 'CONSOLA LOCAL',
     }))
   );
 }
