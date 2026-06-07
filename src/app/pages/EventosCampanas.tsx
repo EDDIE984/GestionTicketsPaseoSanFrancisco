@@ -100,12 +100,13 @@ export function EventosCampanas() {
   }, []);
 
   const handleAdd = async (form: Omit<EventoCampana, 'id' | 'created_at'>) => {
+    const activeCategoriaIds = categorias.filter((c) => c.activo).map((c) => c.id);
     const normalizedForm = {
       ...form,
       valor_minimo: Number.isFinite(form.valor_minimo) ? form.valor_minimo : 0,
       valor_maximo: Number.isFinite(form.valor_maximo) ? form.valor_maximo : 0,
       activo: form.activo ?? true,
-      categoria_ids: form.categoria_ids ?? [],
+      categoria_ids: form.categoria_ids ?? activeCategoriaIds,
       cupon_ids: form.cupon_ids ?? [],
       entregable_ids: form.entregable_ids ?? [],
     };
@@ -170,12 +171,19 @@ export function EventosCampanas() {
     const [localCategorias, setLocalCategorias] = React.useState<string[]>(item?.categoria_ids ?? []);
     const [localCupones, setLocalCupones] = React.useState<string[]>(item?.cupon_ids ?? []);
     const [localEntregables, setLocalEntregables] = React.useState<string[]>(item?.entregable_ids ?? []);
+    const categoriasActivas = categorias.filter((c) => c.activo);
+    const categoriaIdsActivas = categoriasActivas.map((c) => c.id);
+    const categoriasExcluidas = categoriaIdsActivas.filter((id) => !localCategorias.includes(id));
 
     React.useEffect(() => {
-      setLocalCategorias(item?.categoria_ids ?? []);
+      const categoriasParticipantes = item?.id
+        ? item?.categoria_ids ?? []
+        : categorias.filter((c) => c.activo).map((c) => c.id);
+      setLocalCategorias(categoriasParticipantes);
+      onChange('categoria_ids', categoriasParticipantes);
       setLocalCupones(item?.cupon_ids ?? []);
       setLocalEntregables(item?.entregable_ids ?? []);
-    }, [item?.id]);
+    }, [item?.id, categorias.length]);
 
     React.useEffect(() => {
       onChange('valor_minimo', item?.valor_minimo ?? 0);
@@ -183,8 +191,10 @@ export function EventosCampanas() {
       onChange('activo', item?.activo ?? true);
     }, [item?.id]);
 
-    const toggleCategoria = (id: string, checked: boolean) => {
-      const updated = checked ? [...localCategorias, id] : localCategorias.filter((x) => x !== id);
+    const toggleCategoriaExcluida = (id: string, checked: boolean) => {
+      const updated = checked
+        ? localCategorias.filter((x) => x !== id)
+        : Array.from(new Set([...localCategorias, id]));
       setLocalCategorias(updated);
       onChange('categoria_ids', updated);
     };
@@ -215,26 +225,32 @@ export function EventosCampanas() {
           {/* Categorías */}
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-lg p-6 border border-border">
             <div className="flex items-center justify-between mb-4">
-              <Label className="text-base font-semibold">Categorías participantes</Label>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  const all = categorias.filter((c) => c.activo).map((c) => c.id);
-                  setLocalCategorias(all);
-                  onChange('categoria_ids', all);
-                }}
-              >
-                Seleccionar todas
-              </Button>
+              <div>
+                <Label className="text-base font-semibold">Categorías excluidas</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Todas las categorías activas participan por defecto. Marca solo las que no aplican.
+                </p>
+              </div>
+              {categoriasExcluidas.length > 0 && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setLocalCategorias(categoriaIdsActivas);
+                    onChange('categoria_ids', categoriaIdsActivas);
+                  }}
+                >
+                  Incluir todas
+                </Button>
+              )}
             </div>
             <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {categorias.filter((c) => c.activo).map((c) => (
+              {categoriasActivas.map((c) => (
                 <label key={c.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent/60 cursor-pointer">
                   <Checkbox
-                    checked={localCategorias.includes(c.id)}
-                    onCheckedChange={(checked) => toggleCategoria(c.id, !!checked)}
+                    checked={categoriasExcluidas.includes(c.id)}
+                    onCheckedChange={(checked) => toggleCategoriaExcluida(c.id, !!checked)}
                   />
                   <span className="text-sm font-medium">{c.nombre}</span>
                 </label>
