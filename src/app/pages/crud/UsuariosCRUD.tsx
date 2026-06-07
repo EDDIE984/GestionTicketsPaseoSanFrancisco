@@ -22,20 +22,34 @@ export function UsuariosCRUD() {
   }, []);
 
   const handleAdd = async (form: Omit<UsuarioForm, 'id'>) => {
+    const nombre = form.nombre?.trim();
+    const email = form.email?.trim();
+    const password = form.password?.trim();
+
+    if (!nombre) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+    if (!email) {
+      toast.error('El email es obligatorio');
+      return;
+    }
     if (!form.password?.trim()) {
       toast.error('La contraseña es obligatoria');
       return;
     }
     try {
       const created = await createUsuario({
-        nombre: form.nombre,
-        email: form.email,
-        password: form.password,
-        rol: form.rol as 'Admin' | 'Usuario',
+        nombre,
+        email,
+        password,
+        rol: (form.rol as 'Admin' | 'Usuario' | undefined) ?? 'Usuario',
         activo: form.activo ?? true,
       });
       setUsuarios((prev) => [...prev, created]);
-    } catch {
+      toast.success('Usuario creado correctamente');
+    } catch (error) {
+      console.error('Error al crear usuario:', error);
       toast.error('Error al crear el usuario');
     }
   };
@@ -43,14 +57,16 @@ export function UsuariosCRUD() {
   const handleEdit = async (id: string | number, form: Partial<UsuarioForm>) => {
     try {
       const updated = await updateUsuario(String(id), {
-        nombre: form.nombre,
-        email: form.email,
-        password: form.password,
+        nombre: form.nombre?.trim(),
+        email: form.email?.trim(),
+        password: form.password?.trim(),
         rol: form.rol as 'Admin' | 'Usuario' | undefined,
         activo: form.activo,
       });
       setUsuarios((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-    } catch {
+      toast.success('Usuario actualizado correctamente');
+    } catch (error) {
+      console.error('Error al actualizar usuario:', error);
       toast.error('Error al actualizar el usuario');
     }
   };

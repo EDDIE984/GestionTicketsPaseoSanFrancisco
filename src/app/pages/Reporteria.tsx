@@ -68,6 +68,7 @@ const meses = [
 ];
 
 const COLORS = ['#0f766e', '#2563eb', '#c2410c', '#9333ea', '#ca8a04', '#4f46e5'];
+const diasDelMes = Array.from({ length: 31 }, (_, i) => i + 1);
 
 function formatMiles(value: number | string | null | undefined, decimals = 0) {
   const parsed = parseNumber(value);
@@ -87,11 +88,14 @@ function parseNumber(value: number | string | null | undefined) {
 }
 
 function getDateParts(dateValue: string) {
-  const [year, month, day] = dateValue.split('T')[0].split('-').map(Number);
+  const [year, month, day] = dateValue.slice(0, 10).split('-').map(Number);
+
+  if (!year || !month || !day) return null;
+
   return {
     year,
-    month: (month || 1) - 1,
-    day: day || 1,
+    month: month - 1,
+    day,
   };
 }
 
@@ -129,12 +133,36 @@ function getCupones(factura: ReporteriaFactura) {
     .join(' | ');
 }
 
+function renderCategoriaLegend(
+  props: { payload?: Array<{ color?: string; payload?: { nombre?: string; value?: number; porcentaje?: number } }> }
+) {
+  const payload = props.payload ?? [];
+
+  return (
+    <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
+      {payload.map((entry) => (
+        <div key={entry.payload?.nombre} className="flex min-w-0 items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-sm"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="min-w-0 flex-1 truncate">{entry.payload?.nombre}</span>
+          <span className="shrink-0 font-medium text-slate-900">
+            {formatMiles(entry.payload?.porcentaje ?? 0, 2)}%
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Reporteria() {
   const [eventos, setEventos] = useState<ReporteriaEvento[]>([]);
   const [facturas, setFacturas] = useState<ReporteriaFactura[]>([]);
   const [campaniaSeleccionada, setCampaniaSeleccionada] = useState('');
   const [mesesSeleccionados, setMesesSeleccionados] = useState<number[]>([]);
-  const [diasSeleccionados, setDiasSeleccionados] = useState<number[]>([]);
+  const [diaDesde, setDiaDesde] = useState('todos');
+  const [diaHasta, setDiaHasta] = useState('todos');
   const [cargandoEventos, setCargandoEventos] = useState(true);
   const [cargandoFacturas, setCargandoFacturas] = useState(false);
 
@@ -170,20 +198,41 @@ export function Reporteria() {
     );
   };
 
-  const toggleDia = (dia: number) => {
-    setDiasSeleccionados((prev) =>
-      prev.includes(dia) ? prev.filter((d) => d !== dia) : [...prev, dia],
-    );
+  const handleCampaniaChange = (eventoId: string) => {
+    setCampaniaSeleccionada(eventoId);
+    setMesesSeleccionados([]);
+    setDiaDesde('todos');
+    setDiaHasta('todos');
+  };
+
+  const handleDiaDesdeChange = (value: string) => {
+    setDiaDesde(value);
+    if (value !== 'todos' && diaHasta !== 'todos' && Number(value) > Number(diaHasta)) {
+      setDiaHasta(value);
+    }
+  };
+
+  const handleDiaHastaChange = (value: string) => {
+    setDiaHasta(value);
+    if (value !== 'todos' && diaDesde !== 'todos' && Number(value) < Number(diaDesde)) {
+      setDiaDesde(value);
+    }
   };
 
   const facturasFiltradas = useMemo(() => {
+    const desde = diaDesde === 'todos' ? null : Number(diaDesde);
+    const hasta = diaHasta === 'todos' ? null : Number(diaHasta);
+
     return facturas.filter((factura) => {
-      const { month, day } = getDateParts(factura.fecha_emision);
+      const dateParts = getDateParts(factura.fecha_emision);
+      if (!dateParts) return mesesSeleccionados.length === 0 && desde === null && hasta === null;
+      const { month, day } = dateParts;
       if (mesesSeleccionados.length > 0 && !mesesSeleccionados.includes(month)) return false;
-      if (diasSeleccionados.length > 0 && !diasSeleccionados.includes(day)) return false;
+      if (desde !== null && day < desde) return false;
+      if (hasta !== null && day > hasta) return false;
       return true;
     });
-  }, [facturas, mesesSeleccionados, diasSeleccionados]);
+  }, [facturas, mesesSeleccionados, diaDesde, diaHasta]);
 
   const kpis = useMemo(() => {
     const totalFacturas = facturasFiltradas.length;
@@ -231,14 +280,16 @@ export function Reporteria() {
   }, [facturasFiltradas]);
 
   const datosCanjesDias = useMemo(() => {
-    return Array.from({ length: 31 }, (_, index) => {
-      const dia = index + 1;
+    const desde = diaDesde === 'todos' ? 1 : Number(diaDesde);
+    const hasta = diaHasta === 'todos' ? 31 : Number(diaHasta);
+
+    return diasDelMes.filter((dia) => dia >= desde && dia <= hasta).map((dia) => {
       const total = facturasFiltradas
-        .filter((factura) => getDateParts(factura.fecha_emision).day === dia)
+        .filter((factura) => getDateParts(factura.fecha_emision)?.day === dia)
         .reduce((sum, factura) => sum + parseNumber(factura.total_entregables), 0);
       return { dia, total };
     });
-  }, [facturasFiltradas]);
+  }, [facturasFiltradas, diaDesde, diaHasta]);
 
   const rowsExcel = useMemo(() => {
     return facturasFiltradas.map((factura) => {
@@ -321,7 +372,7 @@ export function Reporteria() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Select value={campaniaSeleccionada} onValueChange={setCampaniaSeleccionada} disabled={cargandoEventos}>
+              <Select value={campaniaSeleccionada} onValueChange={handleCampaniaChange} disabled={cargandoEventos}>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecciona campaña" />
                 </SelectTrigger>
@@ -352,6 +403,7 @@ export function Reporteria() {
               <div className="grid grid-cols-2 gap-2">
                 {meses.map((mes) => (
                   <Button
+                    type="button"
                     key={mes.valor}
                     variant={mesesSeleccionados.includes(mes.valor) ? 'default' : 'outline'}
                     size="sm"
@@ -369,32 +421,58 @@ export function Reporteria() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Calendar className="h-4 w-4" />
-                Día de emisión
+                Rango de días
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-5 gap-2">
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => (
-                  <Button
-                    key={dia}
-                    variant={diasSeleccionados.includes(dia) ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => toggleDia(dia)}
-                    className="px-0 text-xs"
-                  >
-                    {dia}
-                  </Button>
-                ))}
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-500">Desde</Label>
+                  <Select value={diaDesde} onValueChange={handleDiaDesdeChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Desde" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos</SelectItem>
+                      {diasDelMes.map((dia) => (
+                        <SelectItem key={dia} value={String(dia)}>
+                          {dia}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-500">Hasta</Label>
+                  <Select value={diaHasta} onValueChange={handleDiaHastaChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Hasta" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos</SelectItem>
+                      {diasDelMes.map((dia) => (
+                        <SelectItem key={dia} value={String(dia)}>
+                          {dia}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+              <p className="text-xs leading-5 text-slate-500">
+                Puedes elegir solo inicio, solo fin, o un rango completo dentro del mes.
+              </p>
             </CardContent>
           </Card>
 
           <Button
+            type="button"
             variant="outline"
             className="w-full"
             onClick={() => {
               setMesesSeleccionados([]);
-              setDiasSeleccionados([]);
+              setDiaDesde('todos');
+              setDiaHasta('todos');
             }}
           >
             Limpiar filtros
@@ -495,13 +573,13 @@ export function Reporteria() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={datosCanjeLocal} layout="vertical">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={datosCanjeLocal.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tickFormatter={(value) => formatMiles(value)} />
-                        <YAxis dataKey="nombre" type="category" width={120} tick={{ fontSize: 11 }} />
+                        <YAxis dataKey="nombre" type="category" width={96} tick={{ fontSize: 10 }} />
                         <Tooltip formatter={(value) => formatMiles(Number(value))} />
-                        <Bar dataKey="total" fill="#0f766e" />
+                        <Bar dataKey="total" fill="#0f766e" barSize={16} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -520,17 +598,22 @@ export function Reporteria() {
                         <Pie
                           data={datosCanjeCategoria}
                           cx="50%"
-                          cy="50%"
+                          cy="43%"
                           labelLine={false}
-                          label={({ nombre, porcentaje }) => `${nombre} ${formatMiles(Number(porcentaje), 2)}%`}
-                          outerRadius={90}
+                          outerRadius={86}
                           dataKey="value"
                         >
                           {datosCanjeCategoria.map((entry, index) => (
                             <Cell key={`${entry.nombre}-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value) => formatMiles(Number(value))} />
+                        <Tooltip
+                          formatter={(value, _name, item) => [
+                            `${formatMiles(Number(value))} entregables (${formatMiles(Number(item.payload?.porcentaje ?? 0), 2)}%)`,
+                            item.payload?.nombre ?? 'Categoría',
+                          ]}
+                        />
+                        <Legend content={renderCategoriaLegend} />
                       </PieChart>
                     </ResponsiveContainer>
                   </CardContent>

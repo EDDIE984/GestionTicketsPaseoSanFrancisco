@@ -659,27 +659,37 @@ export function Registro() {
         return;
       }
 
-      for (const fp of facturasPendientes) {
-        if (await existsFacturaByNumero(fp.numeroFactura.trim(), fp.localId, fp.eventoId)) {
-          toast.error(`La factura ${fp.numeroFactura} ya fue registrada por este local en esta campaña`);
-          return;
-        }
+      const validacionesDuplicados = await Promise.all(
+        facturasPendientes.map(async (fp) => ({
+          factura: fp,
+          existe: await existsFacturaByNumero(fp.numeroFactura.trim(), fp.localId, fp.eventoId),
+        }))
+      );
+      const facturaExistente = validacionesDuplicados.find((validacion) => validacion.existe)?.factura;
+      if (facturaExistente) {
+        toast.error(`La factura ${facturaExistente.numeroFactura} ya fue registrada por este local en esta campaña`);
+        return;
       }
 
       const consentimientosPendientes = new Map<string, string[]>();
       const facturasRegistradas: FacturaPendiente[] = [];
+      const clientesPorCedula = new Map<string, Awaited<ReturnType<typeof upsertCliente>>>();
 
       for (const fp of facturasPendientes) {
         // 1. Upsert cliente
-        const cliente = await upsertCliente({
-          cedula: fp.cedula,
-          nombre: fp.nombre,
-          apellido: fp.apellido,
-          direccion: fp.direccion,
-          telefono: fp.telefono,
-          correo: fp.correo,
-          genero: fp.genero as 'masculino' | 'femenino',
-        });
+        let cliente = clientesPorCedula.get(fp.cedula);
+        if (!cliente) {
+          cliente = await upsertCliente({
+            cedula: fp.cedula,
+            nombre: fp.nombre,
+            apellido: fp.apellido,
+            direccion: fp.direccion,
+            telefono: fp.telefono,
+            correo: fp.correo,
+            genero: fp.genero as 'masculino' | 'femenino',
+          });
+          clientesPorCedula.set(fp.cedula, cliente);
+        }
 
         // 2. Crear factura
         const factura = await createFactura(
@@ -728,26 +738,30 @@ export function Registro() {
         });
       }
 
-      for (const [clienteId, facturaIds] of consentimientosPendientes.entries()) {
-        try {
-          const result = await enviarConsentimientoCliente(clienteId, facturaIds);
-          if (result.skipped) {
-            toast.info('El cliente ya aceptó la política de protección de datos');
-          }
-        } catch {
-          toast.error('Las facturas se registraron, pero no se pudo enviar el correo de consentimiento');
-        }
-      }
-
-      // Recargar facturas del día
-      const actualizadas = await fetchFacturasDelDia();
-      setFacturas(actualizadas);
-
       setFacturasActuales(facturasRegistradas);
       setFacturasPendientes([]);
       setMostrarDialogoTickets(true);
       setTicketsImpresos(false);
       limpiarCliente();
+
+      void Promise.all([
+        Promise.all(
+          Array.from(consentimientosPendientes.entries()).map(async ([clienteId, facturaIds]) => {
+            const result = await enviarConsentimientoCliente(clienteId, facturaIds);
+            if (result.skipped) {
+              toast.info('El cliente ya aceptó la política de protección de datos');
+            }
+          })
+        ).catch((error) => {
+          console.error('No se pudo enviar el consentimiento', error);
+          toast.error('Las facturas se registraron, pero no se pudo enviar el correo de consentimiento');
+        }),
+        fetchFacturasDelDia()
+          .then(setFacturas)
+          .catch((error) => {
+            console.error('No se pudo recargar facturas del día', error);
+          }),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       const esDuplicada = message.includes('duplicate') || message.includes('facturas_numero_factura_key');
