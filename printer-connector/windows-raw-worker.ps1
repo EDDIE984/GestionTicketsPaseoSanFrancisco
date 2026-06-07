@@ -1,3 +1,5 @@
+param([switch]$CompileOnly)
+
 $ErrorActionPreference = "Stop"
 
 $source = @"
@@ -87,18 +89,23 @@ function Write-JsonLine($value) {
 }
 
 $dllPath = Join-Path $PSScriptRoot 'RawPrinterWorkerHelper.dll'
-$dllLoaded = $false
+
 if (Test-Path $dllPath) {
   try {
     Add-Type -Path $dllPath
-    $dllLoaded = $true
   } catch {
+    # Already loaded in this session or corrupt — recompile
     Remove-Item $dllPath -Force -ErrorAction SilentlyContinue
+    Add-Type -TypeDefinition $source -OutputAssembly $dllPath
+    Add-Type -Path $dllPath
   }
-}
-if (-not $dllLoaded) {
+} else {
   Add-Type -TypeDefinition $source -OutputAssembly $dllPath
+  Add-Type -Path $dllPath
 }
+
+if ($CompileOnly) { exit 0 }
+
 Write-JsonLine @{ ready = $true }
 
 while ($true) {

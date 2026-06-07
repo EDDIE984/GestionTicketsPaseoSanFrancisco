@@ -50,6 +50,13 @@ PRINTER_CONNECTOR_PORT=3010
 PRINTER_TOKEN=$PrinterToken
 "@ | Set-Content -Path $EnvFile -Encoding UTF8
 
+Write-Host "Pre-compilando driver de impresora RAW (espera un momento)..." -ForegroundColor Cyan
+$WorkerPs1 = Join-Path $InstallDir "printer-connector\windows-raw-worker.ps1"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $WorkerPs1 -CompileOnly
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Advertencia: no se pudo pre-compilar el driver RAW. La primera impresion tardara mas." -ForegroundColor Yellow
+}
+
 $Action = New-ScheduledTaskAction -Execute $NodePath -Argument "printer-connector/server.js" -WorkingDirectory $InstallDir
 $Trigger = New-ScheduledTaskTrigger -AtLogOn
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
