@@ -110,10 +110,17 @@ export function ImpresoraPOS() {
     setCancelando(true);
     try {
       const result = await cancelarColaImpresion();
-      toast.success(`Cola cancelada. Trabajos locales cancelados: ${result.localJobsCancelled}`);
+      if (result.systemQueueError) {
+        toast.warning(`Cola local cancelada. El sistema no respondió a tiempo: ${result.systemQueueError}`);
+      } else {
+        toast.success(`Cola cancelada. Trabajos locales cancelados: ${result.localJobsCancelled}`);
+      }
       await cargarEstado(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo cancelar la cola de impresión');
+      const mensaje = err instanceof Error && err.name === 'AbortError'
+        ? 'La consola tardó demasiado en responder al cancelar la cola'
+        : err instanceof Error ? err.message : 'No se pudo cancelar la cola de impresión';
+      toast.error(mensaje);
     } finally {
       setCancelando(false);
     }

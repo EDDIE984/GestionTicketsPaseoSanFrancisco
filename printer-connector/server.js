@@ -16,6 +16,7 @@ const DATA_DIR = path.resolve(process.env.PRINTER_DATA_DIR || 'printer-connector
 const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
 const SPOOL_DIR = path.join(DATA_DIR, 'spool');
 const PAPER_CHARS = 42;
+const CANCEL_TIMEOUT_MS = Number(process.env.PRINTER_CANCEL_TIMEOUT_MS || 5000);
 
 function loadLocalEnv() {
   const envPath = path.resolve('.env');
@@ -152,6 +153,26 @@ function wrap(text, width = PAPER_CHARS) {
   return lines.length ? lines : [''];
 }
 
+function execFileWithTimeout(command, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(command, args, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr || stdout || error.message));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Timeout ejecutando ${command}`));
+    }, timeoutMs);
+
+    child.once('exit', () => clearTimeout(timeout));
+    child.once('error', () => clearTimeout(timeout));
+  });
+}
+
 function buildTicketBuffer(ticket) {
   const parts = [];
   const esc = (...bytes) => Buffer.from(bytes);
@@ -256,38 +277,22 @@ async function cancelSystemPrinterQueue() {
   if (!PRINTER_NAME) throw new Error('Falta PRINTER_NAME para cancelar la cola');
 
   if (process.platform === 'win32') {
-    await new Promise((resolve, reject) => {
-      execFile(
-        'powershell.exe',
-        [
-          '-NoLogo',
-          '-NoProfile',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-Command',
-          `Get-PrintJob -PrinterName '${PRINTER_NAME.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Remove-PrintJob`,
-        ],
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(new Error(stderr || stdout || error.message));
-            return;
-          }
-          resolve();
-        }
-      );
-    });
+    await execFileWithTimeout(
+      'powershell.exe',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `Get-PrintJob -PrinterName '${PRINTER_NAME.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Remove-PrintJob`,
+      ],
+      CANCEL_TIMEOUT_MS
+    );
     return true;
   }
 
-  await new Promise((resolve, reject) => {
-    execFile('cancel', ['-a', PRINTER_NAME], (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(stderr || stdout || error.message));
-        return;
-      }
-      resolve();
-    });
-  });
+  await execFileWithTimeout('cancel', ['-a', PRINTER_NAME], CANCEL_TIMEOUT_MS);
 
   return true;
 }
@@ -471,12 +476,21 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === 'POST' && url.pathname === '/cancel-queue') {
-      const systemQueueCancelled = await cancelSystemPrinterQueue();
       const localJobsCancelled = cancelLocalQueue();
+      let systemQueueCancelled = false;
+      let systemQueueError = null;
+
+      try {
+        systemQueueCancelled = await cancelSystemPrinterQueue();
+      } catch (error) {
+        systemQueueError = error instanceof Error ? error.message : String(error);
+      }
+
       return json(response, 200, {
         cancelled: true,
         systemQueueCancelled,
         localJobsCancelled,
+        systemQueueError,
       });
     }
 

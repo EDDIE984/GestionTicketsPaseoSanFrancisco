@@ -93,10 +93,15 @@ export async function enviarTicketsACola(tickets: PosTicket[], source = 'registr
 }
 
 export async function cancelarColaImpresion() {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8000);
+
   const response = await fetch(`${printerUrl}/cancel-queue`, {
     method: 'POST',
     headers: printerHeaders(),
+    signal: controller.signal,
   });
+  window.clearTimeout(timeout);
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -107,6 +112,7 @@ export async function cancelarColaImpresion() {
     cancelled: boolean;
     systemQueueCancelled: boolean;
     localJobsCancelled: number;
+    systemQueueError?: string | null;
   }>;
 }
 
