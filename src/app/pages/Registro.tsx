@@ -291,9 +291,12 @@ export function Registro() {
 
   const calcularSaldoAGenerar = () => {
     if (metodosPago.length === 0) return null;
-    const valorMinimo = eventosActivos.find((e) => e.id === eventoId)?.valor_minimo;
+    const evento = eventosActivos.find((e) => e.id === eventoId);
+    const valorMinimo = evento?.valor_minimo;
     if (!valorMinimo || valorMinimo <= 0) return null;
-    const primerMonto = metodosPago[0]?.monto ?? 0;
+    const valorMaximo = evento?.valor_maximo ?? 0;
+    const primerMontoRaw = metodosPago[0]?.monto ?? 0;
+    const primerMonto = valorMaximo > 0 && primerMontoRaw > valorMaximo ? valorMaximo : primerMontoRaw;
     return parseFloat((
       (primerMonto + saldoAnterior) % valorMinimo +
       metodosPago.slice(1).reduce((acc, m) => acc + (m.monto % valorMinimo), 0)
@@ -347,10 +350,6 @@ export function Registro() {
     if (errorVigencia) return errorVigencia;
     if (!evento) return 'Debes seleccionar un evento válido';
 
-    if (evento.valor_maximo > 0 && monto > evento.valor_maximo) {
-      return `El monto no puede superar el valor máximo por factura del evento ($${evento.valor_maximo.toFixed(2)})`;
-    }
-
     return null;
   };
 
@@ -395,6 +394,7 @@ export function Registro() {
 
     // Obtener datos del evento
     const valorMinimo = evento?.valor_minimo || 1;
+    const valorMaximo = evento?.valor_maximo ?? 0;
 
     // Obtener número del cupón (multiplicador)
     let cuponNumero = 1; // Por defecto sin cupón = multiplicador 1
@@ -411,9 +411,11 @@ export function Registro() {
     cuponNombre = cupon.nombre;
     cuponId = cupon.id;
 
-    // Calcular entregables: el saldo acumulado se suma al primer método de pago
+    // Calcular entregables: el saldo acumulado se suma al primer método de pago.
+    // El monto se capea en valor_maximo (cuando > 0) para limitar el tope de tickets.
     const esPrimerMetodo = metodosPago.length === 0;
-    const montoEfectivo = esPrimerMetodo ? monto + saldoAnterior : monto;
+    const montoParaCalculo = valorMaximo > 0 && monto > valorMaximo ? valorMaximo : monto;
+    const montoEfectivo = esPrimerMetodo ? montoParaCalculo + saldoAnterior : montoParaCalculo;
     const entregablesBase = Math.floor(montoEfectivo / valorMinimo);
     const entregablesCalculados = entregablesBase * cuponNumero;
 
@@ -627,7 +629,11 @@ export function Registro() {
     const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
 
     const eventoValorMinimoLocal = eventoSeleccionado?.valor_minimo ?? 1;
-    const primerMonto = metodosPago[0]?.monto ?? 0;
+    const eventoValorMaximoLocal = eventoSeleccionado?.valor_maximo ?? 0;
+    const primerMontoRaw = metodosPago[0]?.monto ?? 0;
+    const primerMonto = eventoValorMaximoLocal > 0 && primerMontoRaw > eventoValorMaximoLocal
+      ? eventoValorMaximoLocal
+      : primerMontoRaw;
     const nuevoSaldo = parseFloat((
       (primerMonto + saldoAnterior) % eventoValorMinimoLocal +
       metodosPago.slice(1).reduce((acc, m) => acc + (m.monto % eventoValorMinimoLocal), 0)
