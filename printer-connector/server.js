@@ -6,20 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-const PORT = Number(process.env.PRINTER_CONNECTOR_PORT || 3010);
-const HOST = process.env.PRINTER_CONNECTOR_HOST || '127.0.0.1';
-const MODE = process.env.PRINTER_MODE || 'file';
-const PRINTER_HOST = process.env.PRINTER_HOST || '';
-const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
-const PRINTER_NAME = process.env.PRINTER_NAME || '';
-const DATA_DIR = path.resolve(process.env.PRINTER_DATA_DIR || 'printer-connector/data');
-const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
-const SPOOL_DIR = path.join(DATA_DIR, 'spool');
-const PAPER_CHARS = 42;
-const CANCEL_TIMEOUT_MS = Number(process.env.PRINTER_CANCEL_TIMEOUT_MS || 5000);
-const PRINT_TIMEOUT_MS = Number(process.env.PRINTER_PRINT_TIMEOUT_MS || 30000);
-const WORKER_STARTUP_TIMEOUT_MS = Number(process.env.PRINTER_WORKER_STARTUP_TIMEOUT_MS || 600000);
-
 function loadLocalEnv() {
   const envPath = path.resolve('.env');
   if (!fs.existsSync(envPath)) return;
@@ -41,6 +27,19 @@ function loadLocalEnv() {
 
 loadLocalEnv();
 
+const PORT = Number(process.env.PRINTER_CONNECTOR_PORT || 3010);
+const HOST = process.env.PRINTER_CONNECTOR_HOST || '127.0.0.1';
+const MODE = process.env.PRINTER_MODE || 'file';
+const PRINTER_HOST = process.env.PRINTER_HOST || '';
+const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
+const PRINTER_NAME = process.env.PRINTER_NAME || '';
+const DATA_DIR = path.resolve(process.env.PRINTER_DATA_DIR || 'printer-connector/data');
+const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
+const SPOOL_DIR = path.join(DATA_DIR, 'spool');
+const PAPER_CHARS = 42;
+const CANCEL_TIMEOUT_MS = Number(process.env.PRINTER_CANCEL_TIMEOUT_MS || 5000);
+const PRINT_TIMEOUT_MS = Number(process.env.PRINTER_PRINT_TIMEOUT_MS || 30000);
+const WORKER_STARTUP_TIMEOUT_MS = Number(process.env.PRINTER_WORKER_STARTUP_TIMEOUT_MS || 600000);
 const PRINTER_TOKEN = process.env.PRINTER_TOKEN || '';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
