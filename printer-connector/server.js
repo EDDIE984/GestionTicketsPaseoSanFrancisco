@@ -18,6 +18,7 @@ const SPOOL_DIR = path.join(DATA_DIR, 'spool');
 const PAPER_CHARS = 42;
 const CANCEL_TIMEOUT_MS = Number(process.env.PRINTER_CANCEL_TIMEOUT_MS || 5000);
 const PRINT_TIMEOUT_MS = Number(process.env.PRINTER_PRINT_TIMEOUT_MS || 30000);
+const WORKER_STARTUP_TIMEOUT_MS = Number(process.env.PRINTER_WORKER_STARTUP_TIMEOUT_MS || 600000);
 
 function loadLocalEnv() {
   const envPath = path.resolve('.env');
@@ -219,7 +220,7 @@ async function startWindowsRawWorker() {
     startupTimeout = setTimeout(() => {
       worker.kill();
       failStartup(new Error('Timeout iniciando worker RAW de Windows'));
-    }, PRINT_TIMEOUT_MS);
+    }, WORKER_STARTUP_TIMEOUT_MS);
 
     worker.stdout.on('data', (chunk) => {
       stdoutBuffer += chunk.toString('utf8');
