@@ -7,7 +7,7 @@ import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
-import { cancelarColaImpresion, checkPosPrinter, fetchPosPrinterJobs, imprimirTicketPrueba, type PosPrinterHealth, type PosPrinterJob } from '@/lib/api/pos-printer';
+import { cancelarColaImpresion, checkPosPrinter, esperarTrabajoImpresion, fetchPosPrinterJobs, imprimirTicketPrueba, type PosPrinterHealth, type PosPrinterJob } from '@/lib/api/pos-printer';
 
 const estadoClase: Record<PosPrinterJob['status'], string> = {
   pending: 'border-amber-200 bg-amber-50 text-amber-700',
@@ -91,10 +91,13 @@ export function ImpresoraPOS() {
     setProbando(true);
     try {
       const job = await imprimirTicketPrueba(cantidad);
-      toast.success(`${job.totalTickets} ticket(s) de prueba enviados a la cola ${job.jobId}`);
+      toast.info(`${job.totalTickets} ticket(s) de prueba enviados. Esperando confirmación...`);
+      await esperarTrabajoImpresion(job.jobId);
+      toast.success(`${job.totalTickets} ticket(s) de prueba impresos correctamente`);
       await cargarEstado(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo imprimir el ticket de prueba');
+      await cargarEstado(true);
     } finally {
       setProbando(false);
     }

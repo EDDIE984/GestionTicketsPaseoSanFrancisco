@@ -74,12 +74,12 @@ export async function fetchPosPrinterJob(jobId: string) {
   return data as PosPrinterJob;
 }
 
-export async function enviarTicketsACola(tickets: PosTicket[]) {
+export async function enviarTicketsACola(tickets: PosTicket[], source = 'registro') {
   const response = await fetch(`${printerUrl}/print-tickets`, {
     method: 'POST',
     headers: printerHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
-      source: 'registro',
+      source,
       tickets,
     }),
   });
@@ -140,6 +140,7 @@ export async function imprimirTicketPrueba(cantidad = 1) {
         dateStyle: 'short',
         timeStyle: 'medium',
       }),
-    }))
+    })),
+    'configuracion'
   );
 }
