@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
@@ -117,6 +117,9 @@ interface EventoActivo {
   valor_minimo: number;
   valor_maximo: number;
   activo: boolean;
+  evento_categorias: Array<{
+    categoria_id: string;
+  }>;
   evento_cupones: Array<{
     cupon_id: string;
     cupones: { id: string; nombre: string; numero: number };
@@ -126,6 +129,7 @@ interface EventoActivo {
 interface LocalDisponible {
   id: string;
   nombre: string;
+  categoria_id: string;
   activo: boolean;
 }
 
@@ -236,6 +240,25 @@ export function Registro() {
     saldos: Array<{ evento_id: string; evento_nombre: string; saldo: number; updated_at: string }>;
     historial: Array<{ id: string; evento_nombre: string; numero_factura: string; monto_factura: number; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string }>;
   } | null>(null);
+  const eventoSeleccionado = useMemo(
+    () => eventosActivos.find((evento) => evento.id === eventoId),
+    [eventosActivos, eventoId]
+  );
+  const categoriasParticipantesEvento = useMemo(
+    () => new Set((eventoSeleccionado?.evento_categorias ?? []).map((categoria) => categoria.categoria_id)),
+    [eventoSeleccionado]
+  );
+  const localesFiltradosPorEvento = useMemo(() => {
+    if (!eventoId || !eventoSeleccionado) return localesDisponibles;
+    return localesDisponibles.filter((local) => categoriasParticipantesEvento.has(local.categoria_id));
+  }, [categoriasParticipantesEvento, eventoId, eventoSeleccionado, localesDisponibles]);
+
+  useEffect(() => {
+    if (!localId) return;
+    if (!localesFiltradosPorEvento.some((local) => local.id === localId)) {
+      setLocalId('');
+    }
+  }, [localesFiltradosPorEvento, localId]);
 
   const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion || reversandoRegistro;
   const mensajeProceso = guardandoFacturas
@@ -1122,18 +1145,35 @@ export function Registro() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div>
                     <Label htmlFor="localComercial">Local Comercial *</Label>
-                    <Select value={localId} onValueChange={setLocalId}>
+                    <Select
+                      value={localId}
+                      onValueChange={setLocalId}
+                      disabled={!eventoId || localesFiltradosPorEvento.length === 0}
+                    >
                       <SelectTrigger id="localComercial">
-                        <SelectValue placeholder="Selecciona un local" />
+                        <SelectValue
+                          placeholder={
+                            !eventoId
+                              ? 'Selecciona una campaña primero'
+                              : localesFiltradosPorEvento.length === 0
+                                ? 'Sin locales participantes'
+                                : 'Selecciona un local'
+                          }
+                        />
                       </SelectTrigger>
                       <SelectContent>
-                        {localesDisponibles.map((local) => (
+                        {localesFiltradosPorEvento.map((local) => (
                           <SelectItem key={local.id} value={local.id}>
                             {local.nombre}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {eventoId && localesFiltradosPorEvento.length === 0 && (
+                      <p className="mt-2 text-xs text-amber-700">
+                        La campaña seleccionada no tiene categorías participantes con locales activos.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="numeroFactura">Número de Factura *</Label>

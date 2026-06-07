@@ -125,6 +125,7 @@ export async function fetchEventosActivos() {
     .from('eventos_campanas')
     .select(`
       id, nombre, fecha_inicio, fecha_fin, valor_minimo, valor_maximo, activo,
+      evento_categorias(categoria_id),
       evento_cupones(cupon_id, cupones(id, nombre, numero))
     `)
     .eq('activo', true)
@@ -140,6 +141,9 @@ export async function fetchEventosActivos() {
     valor_minimo: number;
     valor_maximo: number;
     activo: boolean;
+    evento_categorias: Array<{
+      categoria_id: string;
+    }>;
     evento_cupones: Array<{
       cupon_id: string;
       cupones: { id: string; nombre: string; numero: number };
