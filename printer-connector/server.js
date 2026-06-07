@@ -527,7 +527,9 @@ function createJob(payload) {
 
   queue.push(job);
   saveQueue();
-  processQueue();
+  setTimeout(() => {
+    processQueue();
+  }, 0);
   return job;
 }
 

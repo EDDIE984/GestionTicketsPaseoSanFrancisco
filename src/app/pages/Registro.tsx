@@ -54,7 +54,7 @@ import {
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
 import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo, fetchTicketsAcumulados } from '@/lib/api/saldo';
-import { checkPosPrinter, enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
+import { enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
 
 interface MetodoPagoLocal {
@@ -950,7 +950,6 @@ export function Registro() {
 
     setMarcandoImpresion(true);
     try {
-      await checkPosPrinter();
       const tickets = construirTicketsPos();
       const job = await enviarTicketsACola(tickets);
       toast.success(`Impresión enviada a la cola (${job.totalTickets} tickets)`);
