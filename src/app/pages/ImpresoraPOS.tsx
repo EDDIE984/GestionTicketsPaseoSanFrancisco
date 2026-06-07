@@ -91,10 +91,18 @@ export function ImpresoraPOS() {
     setProbando(true);
     try {
       const job = await imprimirTicketPrueba(cantidad);
-      toast.info(`${job.totalTickets} ticket(s) de prueba enviados. Esperando confirmación...`);
-      await esperarTrabajoImpresion(job.jobId);
-      toast.success(`${job.totalTickets} ticket(s) de prueba impresos correctamente`);
+      toast.success(`${job.totalTickets} ticket(s) de prueba enviados a la cola ${job.jobId}`);
       await cargarEstado(true);
+
+      void esperarTrabajoImpresion(job.jobId)
+        .then(async () => {
+          toast.success(`${job.totalTickets} ticket(s) de prueba impresos correctamente`);
+          await cargarEstado(true);
+        })
+        .catch(async (err) => {
+          toast.error(err instanceof Error ? err.message : 'No se pudo confirmar la impresión de prueba');
+          await cargarEstado(true);
+        });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo imprimir el ticket de prueba');
       await cargarEstado(true);
