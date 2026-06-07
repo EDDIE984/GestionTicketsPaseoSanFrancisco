@@ -3,7 +3,14 @@ $ErrorActionPreference = "Stop"
 $InstallDir = Join-Path $env:LOCALAPPDATA "PaseoTicketPrinter"
 $ProjectDir = Split-Path -Parent $PSScriptRoot
 $TaskName = "Paseo Ticket Printer"
-$PrinterName = if ($env:PRINTER_NAME) { $env:PRINTER_NAME } else { "EPSON_TM_T20III" }
+$PrinterName = if ($env:PRINTER_NAME) {
+  $env:PRINTER_NAME
+} else {
+  $detected = Get-Printer -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "*EPSON*" -or $_.Name -like "*TM-T*" -or $_.Name -like "*TM_T*" } |
+    Select-Object -First 1
+  if ($detected) { $detected.Name } else { "EPSON_TM_T20III" }
+}
 $PrinterToken = if ($env:PRINTER_TOKEN) { $env:PRINTER_TOKEN } else { "" }
 
 $NodeCommand = Get-Command node -ErrorAction SilentlyContinue

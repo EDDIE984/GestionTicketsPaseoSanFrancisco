@@ -585,6 +585,24 @@ const server = http.createServer(async (request, response) => {
       });
     }
 
+    if (request.method === 'GET' && url.pathname === '/diagnostics') {
+      const diag = { configuredPrinterName: PRINTER_NAME || null, mode: MODE, platform: process.platform, workerReady: windowsRawWorkerReady };
+
+      if (process.platform === 'win32') {
+        try {
+          const { stdout } = await execFileWithTimeout('powershell.exe', [
+            '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+            'Get-Printer | Select-Object Name,PrinterStatus,PortName | ConvertTo-Json -Compress',
+          ], 10000);
+          diag.installedPrinters = JSON.parse(stdout.trim());
+        } catch (err) {
+          diag.printerListError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      return json(response, 200, diag);
+    }
+
     if (request.method === 'POST' && url.pathname === '/cancel-queue') {
       const localJobsCancelled = cancelLocalQueue();
       let systemQueueCancelled = false;

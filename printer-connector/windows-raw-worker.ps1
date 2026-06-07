@@ -87,13 +87,17 @@ function Write-JsonLine($value) {
 }
 
 $dllPath = Join-Path $PSScriptRoot 'RawPrinterWorkerHelper.dll'
+$dllLoaded = $false
 if (Test-Path $dllPath) {
-  $bytes = [System.IO.File]::ReadAllBytes($dllPath)
-  [System.Reflection.Assembly]::Load($bytes) | Out-Null
-} else {
+  try {
+    Add-Type -Path $dllPath
+    $dllLoaded = $true
+  } catch {
+    Remove-Item $dllPath -Force -ErrorAction SilentlyContinue
+  }
+}
+if (-not $dllLoaded) {
   Add-Type -TypeDefinition $source -OutputAssembly $dllPath
-  $bytes = [System.IO.File]::ReadAllBytes($dllPath)
-  [System.Reflection.Assembly]::Load($bytes) | Out-Null
 }
 Write-JsonLine @{ ready = $true }
 
