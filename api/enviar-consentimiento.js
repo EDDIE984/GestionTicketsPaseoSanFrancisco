@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { createServerSupabase, getAppUrl } from './_supabase.js';
-import { buildMailTransport } from './_mail.js';
+import { sendMail } from './_mail.js';
 
 const EXPIRATION_DAYS = 7;
 
@@ -85,8 +85,7 @@ export default async function handler(request, response) {
     const { error: saveError } = await saveQuery;
     if (saveError) throw saveError;
 
-    const transporter = buildMailTransport(config);
-    await transporter.sendMail({
+    await sendMail(config, {
       from: `"${config.nombre_remitente}" <${config.correo_remitente}>`,
       to: cliente.correo,
       replyTo: config.responder_a ?? config.correo_remitente,

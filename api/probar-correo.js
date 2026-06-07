@@ -1,10 +1,19 @@
 import { createServerSupabase } from './_supabase.js';
-import { buildMailTransport } from './_mail.js';
+import { buildMailTransport, sendMail } from './_mail.js';
 
 function getErrorHint(error) {
   const code = error?.code;
   const responseCode = error?.responseCode;
+  const status = error?.status;
 
+  if (code === 'GRAPH_AUTH') {
+    return 'No se pudo autenticar con Microsoft 365. Verifica el Tenant ID, Client ID y Client Secret.';
+  }
+  if (code === 'GRAPH_SEND') {
+    if (status === 403) return 'La aplicación no tiene permiso Mail.Send o el consentimiento del administrador no fue concedido.';
+    if (status === 404) return 'El correo remitente no existe en el tenant de Microsoft 365.';
+    return 'Error al enviar por Microsoft Graph. Revisa las credenciales y permisos configurados.';
+  }
   if (code === 'EAUTH' || responseCode === 535) {
     return 'Revisa el usuario SMTP, la contraseña o si tu proveedor requiere una contraseña de aplicación.';
   }
@@ -18,7 +27,7 @@ function getErrorHint(error) {
     return 'El servidor requiere autenticación o una configuración de seguridad diferente.';
   }
 
-  return 'Revisa los datos SMTP configurados y vuelve a intentar.';
+  return 'Revisa los datos de correo configurados y vuelve a intentar.';
 }
 
 function serializeError(error, phase) {
@@ -33,7 +42,9 @@ function serializeError(error, phase) {
     syscall: error?.syscall ?? null,
     address: error?.address ?? null,
     port: error?.port ?? null,
+    status: error?.status ?? null,
     name: error?.name ?? null,
+    raw: error?.graphError ? JSON.stringify(error.graphError) : null,
     hint: getErrorHint(error),
   };
 }
@@ -74,11 +85,14 @@ export default async function handler(request, response) {
       });
     }
 
-    phase = `Conectando al SMTP ${config.host_smtp}:${config.puerto_smtp}`;
-    const transporter = buildMailTransport(config);
-    await transporter.verify();
+    if (config.tipo_envio === 'smtp') {
+      phase = `Verificando conexión SMTP ${config.host_smtp}:${config.puerto_smtp}`;
+      const transporter = buildMailTransport(config);
+      await transporter.verify();
+    }
+
     phase = `Enviando correo de prueba a ${destinatario}`;
-    await transporter.sendMail({
+    await sendMail(config, {
       from: `"${config.nombre_remitente}" <${config.correo_remitente}>`,
       to: destinatario,
       replyTo: config.responder_a ?? config.correo_remitente,
@@ -86,10 +100,10 @@ export default async function handler(request, response) {
       html: `
         <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
           <p>Esta es una prueba de envío de correo.</p>
-          <p>Si recibiste este mensaje, la parametrización SMTP está funcionando correctamente.</p>
+          <p>Si recibiste este mensaje, la configuración de correo está funcionando correctamente.</p>
         </div>
       `,
-      text: 'Esta es una prueba de envío de correo. Si recibiste este mensaje, la parametrización SMTP está funcionando correctamente.',
+      text: 'Esta es una prueba de envío de correo. Si recibiste este mensaje, la configuración de correo está funcionando correctamente.',
     });
 
     return response.status(200).json({ sent: true, message: `Correo de prueba enviado a ${destinatario}` });

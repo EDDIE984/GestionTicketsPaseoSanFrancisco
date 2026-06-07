@@ -75,11 +75,17 @@ export interface ParametrizacionCorreo {
   id: string;
   nombre_remitente: string;
   correo_remitente: string;
-  host_smtp: string;
+  tipo_envio: 'smtp' | 'graph';
+  // Campos SMTP (nulos cuando tipo_envio = 'graph')
+  host_smtp: string | null;
   puerto_smtp: number;
-  usuario_smtp: string;
-  password_smtp: string;
+  usuario_smtp: string | null;
+  password_smtp: string | null;
   seguridad: 'none' | 'tls' | 'ssl';
+  // Campos Microsoft Graph (nulos cuando tipo_envio = 'smtp')
+  ms_tenant_id: string | null;
+  ms_client_id: string | null;
+  ms_client_secret: string | null;
   responder_a: string | null;
   asunto_prueba: string | null;
   activo: boolean;

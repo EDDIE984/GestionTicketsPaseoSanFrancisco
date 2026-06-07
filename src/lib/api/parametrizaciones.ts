@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import type { ParametrizacionCorreo } from '@/lib/types';
 
 const SELECT_COLUMNS =
-  'id, nombre_remitente, correo_remitente, host_smtp, puerto_smtp, usuario_smtp, password_smtp, seguridad, responder_a, asunto_prueba, activo, updated_at';
+  'id, nombre_remitente, correo_remitente, tipo_envio, host_smtp, puerto_smtp, usuario_smtp, password_smtp, seguridad, ms_tenant_id, ms_client_id, ms_client_secret, responder_a, asunto_prueba, activo, updated_at';
 
 interface ProbarCorreoErrorDetail {
   phase?: string;
