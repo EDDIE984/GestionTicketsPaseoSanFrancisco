@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
@@ -17,6 +17,7 @@ const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
 const SPOOL_DIR = path.join(DATA_DIR, 'spool');
 const PAPER_CHARS = 42;
 const CANCEL_TIMEOUT_MS = Number(process.env.PRINTER_CANCEL_TIMEOUT_MS || 5000);
+const PRINT_TIMEOUT_MS = Number(process.env.PRINTER_PRINT_TIMEOUT_MS || 30000);
 
 function loadLocalEnv() {
   const envPath = path.resolve('.env');
@@ -46,6 +47,11 @@ fs.mkdirSync(SPOOL_DIR, { recursive: true });
 
 let queue = loadQueue();
 let processing = false;
+let windowsRawWorker = null;
+let windowsRawWorkerReady = false;
+let windowsRawWorkerStarting = null;
+let windowsRawWorkerRequestId = 0;
+const windowsRawWorkerRequests = new Map();
 
 function loadQueue() {
   if (!fs.existsSync(QUEUE_FILE)) return [];
@@ -173,6 +179,132 @@ function execFileWithTimeout(command, args, timeoutMs) {
   });
 }
 
+function rejectWindowsRawWorkerRequests(error) {
+  for (const request of windowsRawWorkerRequests.values()) {
+    clearTimeout(request.timeout);
+    request.reject(error);
+  }
+  windowsRawWorkerRequests.clear();
+}
+
+async function startWindowsRawWorker() {
+  if (process.platform !== 'win32') return null;
+  if (windowsRawWorkerReady && windowsRawWorker) return windowsRawWorker;
+  if (windowsRawWorkerStarting) return windowsRawWorkerStarting;
+
+  windowsRawWorkerStarting = new Promise((resolve, reject) => {
+    const workerPath = path.resolve('printer-connector/windows-raw-worker.ps1');
+    let stdoutBuffer = '';
+    let startupTimeout;
+
+    const worker = spawn('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      workerPath,
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const failStartup = (error) => {
+      clearTimeout(startupTimeout);
+      windowsRawWorker = null;
+      windowsRawWorkerReady = false;
+      windowsRawWorkerStarting = null;
+      reject(error);
+    };
+
+    startupTimeout = setTimeout(() => {
+      worker.kill();
+      failStartup(new Error('Timeout iniciando worker RAW de Windows'));
+    }, PRINT_TIMEOUT_MS);
+
+    worker.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk.toString('utf8');
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? '';
+
+      for (const lineText of lines) {
+        if (!lineText.trim()) continue;
+
+        let message;
+        try {
+          message = JSON.parse(lineText);
+        } catch {
+          continue;
+        }
+
+        if (message.ready) {
+          clearTimeout(startupTimeout);
+          windowsRawWorker = worker;
+          windowsRawWorkerReady = true;
+          windowsRawWorkerStarting = null;
+          resolve(worker);
+          continue;
+        }
+
+        const request = windowsRawWorkerRequests.get(message.id);
+        if (!request) continue;
+
+        clearTimeout(request.timeout);
+        windowsRawWorkerRequests.delete(message.id);
+
+        if (message.ok) {
+          request.resolve(message);
+        } else {
+          request.reject(new Error(message.error || 'No se pudo imprimir RAW en Windows'));
+        }
+      }
+    });
+
+    worker.stderr.on('data', (chunk) => {
+      const text = chunk.toString('utf8').trim();
+      if (text) console.error(`Windows RAW worker: ${text}`);
+    });
+
+    worker.once('error', failStartup);
+    worker.once('exit', (code) => {
+      clearTimeout(startupTimeout);
+      windowsRawWorker = null;
+      windowsRawWorkerReady = false;
+      windowsRawWorkerStarting = null;
+      rejectWindowsRawWorkerRequests(new Error(`Worker RAW de Windows finalizo (${code ?? 'sin codigo'})`));
+    });
+  });
+
+  return windowsRawWorkerStarting;
+}
+
+async function writeToWindowsRawWorker(filePath, documentName) {
+  const worker = await startWindowsRawWorker();
+  if (!worker?.stdin.writable) throw new Error('Worker RAW de Windows no disponible');
+
+  const id = ++windowsRawWorkerRequestId;
+  const payload = JSON.stringify({
+    id,
+    printerName: PRINTER_NAME,
+    path: filePath,
+    documentName,
+  });
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      windowsRawWorkerRequests.delete(id);
+      reject(new Error('Timeout enviando trabajo RAW a Windows'));
+    }, PRINT_TIMEOUT_MS);
+
+    windowsRawWorkerRequests.set(id, { resolve, reject, timeout });
+    worker.stdin.write(`${payload}\n`, 'utf8', (error) => {
+      if (!error) return;
+      clearTimeout(timeout);
+      windowsRawWorkerRequests.delete(id);
+      reject(error);
+    });
+  });
+}
+
 function buildTicketBuffer(ticket) {
   const parts = [];
   const esc = (...bytes) => Buffer.from(bytes);
@@ -229,32 +361,7 @@ async function writeToSystemPrinter(buffer) {
 
   try {
     if (process.platform === 'win32') {
-      await new Promise((resolve, reject) => {
-        execFile(
-          'powershell.exe',
-          [
-            '-NoLogo',
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            path.resolve('printer-connector/windows-raw-print.ps1'),
-            '-PrinterName',
-            PRINTER_NAME,
-            '-Path',
-            tempFile,
-            '-DocumentName',
-            'Paseo Ticket Printer',
-          ],
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(new Error(stderr || stdout || error.message));
-              return;
-            }
-            resolve();
-          }
-        );
-      });
+      await writeToWindowsRawWorker(tempFile, 'Paseo Ticket Printer');
       return;
     }
 
@@ -511,4 +618,10 @@ server.listen(PORT, HOST, () => {
         ? ` (${PRINTER_NAME || 'sin PRINTER_NAME'})`
         : ` (spool ${SPOOL_DIR})`;
   console.log(`Modo: ${MODE}${modeDetail}`);
+
+  if (MODE === 'system' && process.platform === 'win32') {
+    startWindowsRawWorker().catch((error) => {
+      console.error(`No se pudo precalentar worker RAW de Windows: ${error.message}`);
+    });
+  }
 });
