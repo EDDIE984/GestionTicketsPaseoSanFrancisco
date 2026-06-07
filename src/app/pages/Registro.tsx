@@ -913,13 +913,19 @@ export function Registro() {
       await checkPosPrinter();
       const tickets = construirTicketsPos();
       const job = await enviarTicketsACola(tickets);
-      toast.info(`Impresión enviada a la cola. Esperando confirmación (${job.totalTickets} tickets)...`);
-      await esperarTrabajoImpresion(job.jobId);
-      await marcarFacturasComoImpresas(facturaIds);
-      setTicketsImpresos(true);
-      const actualizadas = await fetchFacturasDelDia();
-      setFacturas(actualizadas);
-      toast.success(`Tickets impresos correctamente (${job.totalTickets})`);
+      toast.success(`Impresión enviada a la cola (${job.totalTickets} tickets)`);
+
+      void esperarTrabajoImpresion(job.jobId)
+        .then(async () => {
+          await marcarFacturasComoImpresas(facturaIds);
+          setTicketsImpresos(true);
+          const actualizadas = await fetchFacturasDelDia();
+          setFacturas(actualizadas);
+          toast.success(`Tickets impresos correctamente (${job.totalTickets})`);
+        })
+        .catch((error) => {
+          toast.error(error instanceof Error ? error.message : 'No se pudo confirmar la impresión');
+        });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo enviar los tickets a impresión');
     } finally {
@@ -1693,8 +1699,8 @@ export function Registro() {
 
       {/* Diálogo de Tickets */}
       <Dialog open={mostrarDialogoTickets} onOpenChange={setMostrarDialogoTickets}>
-        <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b">
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-6xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6">
             <DialogTitle className="text-2xl">
               Tickets Generados - Total: {facturasActuales.reduce((acc, f) => acc + f.totalEntregables, 0)}
             </DialogTitle>
@@ -1705,7 +1711,7 @@ export function Registro() {
 
           {facturasActuales.length > 0 && (
             <>
-              <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
                 <div className="space-y-10">
                   {facturasActuales.map((facturaActual) => (
                     <div key={facturaActual.id}>
@@ -1782,7 +1788,7 @@ export function Registro() {
                   ))}
                 </div>
               </div>
-              <div className="px-6 py-4 border-t bg-white flex justify-end gap-3">
+              <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t bg-white px-6 py-4">
                 <Button variant="outline" onClick={() => setMostrarDialogoTickets(false)} size="lg">
                   Cerrar
                 </Button>
@@ -1816,7 +1822,7 @@ export function Registro() {
                   ) : (
                     <Printer className="w-5 h-5 mr-2" />
                   )}
-                  {ticketsImpresos ? 'Tickets impresos' : marcandoImpresion ? 'Marcando...' : 'Imprimir todos los tickets'}
+                  {ticketsImpresos ? 'Tickets impresos' : marcandoImpresion ? 'Enviando...' : 'Imprimir todos los tickets'}
                 </Button>
               </div>
             </>
