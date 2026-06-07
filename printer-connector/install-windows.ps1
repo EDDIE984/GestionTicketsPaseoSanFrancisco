@@ -6,12 +6,30 @@ $TaskName = "Paseo Ticket Printer"
 $PrinterName = if ($env:PRINTER_NAME) { $env:PRINTER_NAME } else { "EPSON_TM_T20III" }
 $PrinterToken = if ($env:PRINTER_TOKEN) { $env:PRINTER_TOKEN } else { "" }
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+$NodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if (-not $NodeCommand) {
   Write-Host "Node.js no esta instalado. Instala Node.js LTS y vuelve a ejecutar este instalador." -ForegroundColor Red
   exit 1
 }
+$NodePath = $NodeCommand.Source
+
+Write-Host "Deteniendo consola POS anterior..." -ForegroundColor Cyan
+Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+
+Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -and $_.CommandLine.Contains("PaseoTicketPrinter") } |
+  ForEach-Object {
+    try {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    } catch {}
+  }
+
+Write-Host "Limpiando instalacion anterior..." -ForegroundColor Cyan
+Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+Write-Host "Copiando archivos de la consola POS..." -ForegroundColor Cyan
 Copy-Item -Path (Join-Path $ProjectDir "printer-connector") -Destination $InstallDir -Recurse -Force
 Copy-Item -Path (Join-Path $ProjectDir "package.json") -Destination $InstallDir -Force
 Get-ChildItem -Path $InstallDir -Recurse -Include *.ps1 | Unblock-File -ErrorAction SilentlyContinue
@@ -25,24 +43,12 @@ PRINTER_CONNECTOR_PORT=3010
 PRINTER_TOKEN=$PrinterToken
 "@ | Set-Content -Path $EnvFile -Encoding UTF8
 
-$StartScript = Join-Path $InstallDir "start-printer.cmd"
-@"
-@echo off
-cd /d "$InstallDir"
-set PRINTER_MODE=system
-set PRINTER_NAME=$PrinterName
-set PRINTER_CONNECTOR_HOST=127.0.0.1
-set PRINTER_CONNECTOR_PORT=3010
-set PRINTER_TOKEN=$PrinterToken
-node printer-connector/server.js
-"@ | Set-Content -Path $StartScript -Encoding ASCII
-
-$Action = New-ScheduledTaskAction -Execute $StartScript
+$Action = New-ScheduledTaskAction -Execute $NodePath -Argument "printer-connector/server.js" -WorkingDirectory $InstallDir
 $Trigger = New-ScheduledTaskTrigger -AtLogOn
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
-Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+Write-Host "Registrando servicio de impresion..." -ForegroundColor Cyan
 Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
