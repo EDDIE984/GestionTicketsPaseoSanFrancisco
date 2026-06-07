@@ -622,8 +622,9 @@ server.listen(PORT, HOST, () => {
   console.log(`Modo: ${MODE}${modeDetail}`);
 
   if (MODE === 'system' && process.platform === 'win32') {
-    startWindowsRawWorker().catch((error) => {
-      console.error(`No se pudo precalentar worker RAW de Windows: ${error.message}`);
-    });
+    console.log('Iniciando worker RAW de Windows...');
+    startWindowsRawWorker()
+      .then(() => console.log('Worker RAW listo.'))
+      .catch((error) => console.error('Error iniciando worker RAW:', error.message));
   }
 });
