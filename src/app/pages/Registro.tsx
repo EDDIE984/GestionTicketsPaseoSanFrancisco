@@ -419,6 +419,16 @@ export function Registro() {
     const entregablesBase = Math.floor(montoEfectivo / valorMinimo);
     const entregablesCalculados = entregablesBase * cuponNumero;
 
+    if (valorMaximo > 0 && monto > valorMaximo) {
+      const maxTickets = Math.floor(valorMaximo / valorMinimo);
+      toast.warning(
+        `El monto ($${monto.toFixed(2)}) supera el máximo del evento ($${valorMaximo.toFixed(2)}). ` +
+        `Se generarán ${maxTickets} ticket(s) (tope máximo). ` +
+        `El excedente no acumula saldo para esta promoción.`,
+        { duration: 6000 }
+      );
+    }
+
     setMetodosPago([
       ...metodosPago,
       {
