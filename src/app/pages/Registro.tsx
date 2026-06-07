@@ -53,7 +53,7 @@ import {
 } from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
-import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo } from '@/lib/api/saldo';
+import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo, fetchTicketsAcumulados } from '@/lib/api/saldo';
 import { checkPosPrinter, enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
 
@@ -226,6 +226,7 @@ export function Registro() {
   const [motivoReverso, setMotivoReverso] = useState('');
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [saldoAnterior, setSaldoAnterior] = useState<number>(0);
+  const [ticketsAcumulados, setTicketsAcumulados] = useState<number>(0);
   const [mostrarHistorialSaldo, setMostrarHistorialSaldo] = useState(false);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [historialSaldoData, setHistorialSaldoData] = useState<Array<{
@@ -320,11 +321,11 @@ export function Registro() {
   useEffect(() => {
     if (!clienteId || !eventoId) {
       setSaldoAnterior(0);
+      setTicketsAcumulados(0);
       return;
     }
-    fetchSaldoCliente(clienteId, eventoId)
-      .then(setSaldoAnterior)
-      .catch(() => setSaldoAnterior(0));
+    fetchSaldoCliente(clienteId, eventoId).then(setSaldoAnterior).catch(() => setSaldoAnterior(0));
+    fetchTicketsAcumulados(clienteId, eventoId).then(setTicketsAcumulados).catch(() => setTicketsAcumulados(0));
   }, [clienteId, eventoId]);
 
   const validarEventoVigente = (evento?: EventoActivo) => {
@@ -412,21 +413,44 @@ export function Registro() {
     cuponId = cupon.id;
 
     // Calcular entregables: el saldo acumulado se suma al primer método de pago.
-    // El monto se capea en valor_maximo (cuando > 0) para limitar el tope de tickets.
+    // El monto se capea en valor_maximo (cuando > 0) para limitar el tope por factura.
     const esPrimerMetodo = metodosPago.length === 0;
     const montoParaCalculo = valorMaximo > 0 && monto > valorMaximo ? valorMaximo : monto;
     const montoEfectivo = esPrimerMetodo ? montoParaCalculo + saldoAnterior : montoParaCalculo;
     const entregablesBase = Math.floor(montoEfectivo / valorMinimo);
-    const entregablesCalculados = entregablesBase * cuponNumero;
+    let entregablesCalculados = entregablesBase * cuponNumero;
 
-    if (valorMaximo > 0 && monto > valorMaximo) {
-      const maxTickets = Math.floor(valorMaximo / valorMinimo);
-      toast.warning(
-        `El monto ($${monto.toFixed(2)}) supera el máximo del evento ($${valorMaximo.toFixed(2)}). ` +
-        `Se generarán ${maxTickets} ticket(s) (tope máximo). ` +
-        `El excedente no acumula saldo para esta promoción.`,
-        { duration: 6000 }
-      );
+    if (valorMaximo > 0) {
+      const maxTicketsPromocion = Math.floor(valorMaximo / valorMinimo);
+      const ticketsEnPendientes = facturasPendientes
+        .filter((f) => f.eventoId === eventoId)
+        .reduce((sum, f) => sum + f.totalEntregables, 0);
+      const ticketsEnMetodosActuales = metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0);
+      const ticketsYaUsados = ticketsAcumulados + ticketsEnPendientes + ticketsEnMetodosActuales;
+      const ticketsRestantes = Math.max(0, maxTicketsPromocion - ticketsYaUsados);
+
+      if (ticketsYaUsados >= maxTicketsPromocion) {
+        toast.warning(
+          `Este cliente ya alcanzó el tope de ${maxTicketsPromocion} ticket(s) para esta promoción. ` +
+          `Esta factura no generará tickets ni acumulará saldo.`,
+          { duration: 7000 }
+        );
+        entregablesCalculados = 0;
+      } else if (entregablesCalculados > ticketsRestantes) {
+        toast.warning(
+          `Solo se generarán ${ticketsRestantes} ticket(s) más (tope de ${maxTicketsPromocion} para esta promoción). ` +
+          `El excedente no acumula saldo.`,
+          { duration: 7000 }
+        );
+        entregablesCalculados = ticketsRestantes;
+      } else if (monto > valorMaximo) {
+        toast.warning(
+          `El monto ($${monto.toFixed(2)}) supera el máximo del evento ($${valorMaximo.toFixed(2)}). ` +
+          `Se generarán ${entregablesCalculados} ticket(s) (tope por factura). ` +
+          `El excedente no acumula saldo para esta promoción.`,
+          { duration: 6000 }
+        );
+      }
     }
 
     setMetodosPago([

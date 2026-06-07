@@ -86,6 +86,19 @@ export async function fetchHistorialSaldoEvento(
   }));
 }
 
+export async function fetchTicketsAcumulados(
+  clienteId: string,
+  eventoId: string
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('historial_saldo')
+    .select('tickets_generados')
+    .eq('cliente_id', clienteId)
+    .eq('evento_id', eventoId);
+  if (error) throw error;
+  return (data ?? []).reduce((sum, row) => sum + (row.tickets_generados || 0), 0);
+}
+
 export async function fetchSaldoPorCliente(clienteId: string): Promise<{
   saldos: Array<{ evento_id: string; evento_nombre: string; saldo: number; updated_at: string }>;
   historial: Array<{
