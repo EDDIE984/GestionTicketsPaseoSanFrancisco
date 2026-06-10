@@ -9,6 +9,7 @@ export interface AuthUser {
 
 export interface AuthContextType {
   user: AuthUser | null;
+  loading: boolean;
   login: (user: AuthUser) => void;
   logout: () => void;
 }

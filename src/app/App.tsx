@@ -19,11 +19,20 @@ import { Reporteria } from '@/app/pages/Reporteria';
 import { Trafico } from '@/app/pages/Trafico';
 import { Login } from '@/app/pages/Login';
 import { useAuth } from '@/app/components/AuthContext';
-import { useState } from 'react';
 
 export default function App() {
-  const { user, login, logout } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const { user, loading, login, logout } = useAuth();
+
+  if (loading) {
+    return (
+      <>
+        <GlobalToaster />
+        <div className="flex min-h-screen items-center justify-center bg-white text-sm text-slate-500">
+          Cargando sesión...
+        </div>
+      </>
+    );
+  }
 
   if (!user) {
     return (

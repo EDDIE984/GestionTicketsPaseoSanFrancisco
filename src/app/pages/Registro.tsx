@@ -53,7 +53,7 @@ import {
 } from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
-import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo, fetchTicketsAcumulados } from '@/lib/api/saldo';
+import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo } from '@/lib/api/saldo';
 import { enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
 
@@ -226,7 +226,6 @@ export function Registro() {
   const [motivoReverso, setMotivoReverso] = useState('');
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [saldoAnterior, setSaldoAnterior] = useState<number>(0);
-  const [ticketsAcumulados, setTicketsAcumulados] = useState<number>(0);
   const [mostrarHistorialSaldo, setMostrarHistorialSaldo] = useState(false);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [historialSaldoData, setHistorialSaldoData] = useState<Array<{
@@ -290,18 +289,61 @@ export function Registro() {
     return Math.max(totalFactura - calcularTotalMetodos(), 0);
   };
 
+  const calcularResultadoFactura = (
+    evento: EventoActivo | undefined,
+    montoFactura: number,
+    saldoActual: number,
+    cuponNumero = 1
+  ) => {
+    const valorMinimo = evento?.valor_minimo ?? 0;
+    const valorMaximo = evento?.valor_maximo ?? 0;
+
+    if (!valorMinimo || valorMinimo <= 0 || !Number.isFinite(montoFactura) || montoFactura <= 0) {
+      return {
+        tickets: 0,
+        saldoNuevo: parseFloat(saldoActual.toFixed(2)),
+        excedenteDescartado: 0,
+        maxTicketsFactura: 0,
+      };
+    }
+
+    const montoPermitido = valorMaximo > 0 ? Math.min(montoFactura, valorMaximo) : montoFactura;
+    const excedenteDescartado = valorMaximo > 0 ? Math.max(montoFactura - valorMaximo, 0) : 0;
+    const maxTicketsFactura = valorMaximo > 0
+      ? Math.floor(valorMaximo / valorMinimo)
+      : Number.POSITIVE_INFINITY;
+    const montoDisponible = montoPermitido + saldoActual;
+    const ticketsBaseSinTope = Math.floor(montoDisponible / valorMinimo);
+    const ticketsSinTope = ticketsBaseSinTope * cuponNumero;
+    const tickets = Math.min(ticketsSinTope, maxTicketsFactura);
+    const ticketsBaseConsumidos = cuponNumero > 0
+      ? Math.ceil(tickets / cuponNumero)
+      : tickets;
+    const montoConsumido = ticketsBaseConsumidos * valorMinimo;
+    const saldoNuevo = parseFloat(Math.max(montoDisponible - montoConsumido, 0).toFixed(2));
+
+    return {
+      tickets,
+      saldoNuevo,
+      excedenteDescartado: parseFloat(excedenteDescartado.toFixed(2)),
+      maxTicketsFactura: Number.isFinite(maxTicketsFactura) ? maxTicketsFactura : 0,
+    };
+  };
+
+  const distribuirEntregablesEnMetodos = (
+    metodos: MetodoPagoLocal[],
+    totalEntregables: number
+  ) => metodos.map((metodo, index) => ({
+    ...metodo,
+    entregablesCalculados: index === 0 ? totalEntregables : 0,
+  }));
+
   const calcularSaldoAGenerar = () => {
     if (metodosPago.length === 0) return null;
     const evento = eventosActivos.find((e) => e.id === eventoId);
-    const valorMinimo = evento?.valor_minimo;
-    if (!valorMinimo || valorMinimo <= 0) return null;
-    const valorMaximo = evento?.valor_maximo ?? 0;
-    const primerMontoRaw = metodosPago[0]?.monto ?? 0;
-    const primerMonto = valorMaximo > 0 && primerMontoRaw > valorMaximo ? valorMaximo : primerMontoRaw;
-    return parseFloat((
-      (primerMonto + saldoAnterior) % valorMinimo +
-      metodosPago.slice(1).reduce((acc, m) => acc + (m.monto % valorMinimo), 0)
-    ).toFixed(2));
+    const montoFactura = parseFloat(montoTotal);
+    if (!evento || !Number.isFinite(montoFactura) || montoFactura <= 0) return null;
+    return calcularResultadoFactura(evento, montoFactura, saldoAnterior).saldoNuevo;
   };
 
   useEffect(() => {
@@ -321,11 +363,9 @@ export function Registro() {
   useEffect(() => {
     if (!clienteId || !eventoId) {
       setSaldoAnterior(0);
-      setTicketsAcumulados(0);
       return;
     }
     fetchSaldoCliente(clienteId, eventoId).then(setSaldoAnterior).catch(() => setSaldoAnterior(0));
-    fetchTicketsAcumulados(clienteId, eventoId).then(setTicketsAcumulados).catch(() => setTicketsAcumulados(0));
   }, [clienteId, eventoId]);
 
   const validarEventoVigente = (evento?: EventoActivo) => {
@@ -393,10 +433,6 @@ export function Registro() {
       (m) => m.id === metodoSeleccionado
     )?.nombre || '';
 
-    // Obtener datos del evento
-    const valorMinimo = evento?.valor_minimo || 1;
-    const valorMaximo = evento?.valor_maximo ?? 0;
-
     // Obtener número del cupón (multiplicador)
     let cuponNumero = 1; // Por defecto sin cupón = multiplicador 1
     let cuponNombre: string | undefined = undefined;
@@ -412,48 +448,7 @@ export function Registro() {
     cuponNombre = cupon.nombre;
     cuponId = cupon.id;
 
-    // Calcular entregables: el saldo acumulado se suma al primer método de pago.
-    // El monto se capea en valor_maximo (cuando > 0) para limitar el tope por factura.
-    const esPrimerMetodo = metodosPago.length === 0;
-    const montoParaCalculo = valorMaximo > 0 && monto > valorMaximo ? valorMaximo : monto;
-    const montoEfectivo = esPrimerMetodo ? montoParaCalculo + saldoAnterior : montoParaCalculo;
-    const entregablesBase = Math.floor(montoEfectivo / valorMinimo);
-    let entregablesCalculados = entregablesBase * cuponNumero;
-
-    if (valorMaximo > 0) {
-      const maxTicketsPromocion = Math.floor(valorMaximo / valorMinimo);
-      const ticketsEnPendientes = facturasPendientes
-        .filter((f) => f.eventoId === eventoId)
-        .reduce((sum, f) => sum + f.totalEntregables, 0);
-      const ticketsEnMetodosActuales = metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0);
-      const ticketsYaUsados = ticketsAcumulados + ticketsEnPendientes + ticketsEnMetodosActuales;
-      const ticketsRestantes = Math.max(0, maxTicketsPromocion - ticketsYaUsados);
-
-      if (ticketsYaUsados >= maxTicketsPromocion) {
-        toast.warning(
-          `Este cliente ya alcanzó el tope de ${maxTicketsPromocion} ticket(s) para esta promoción. ` +
-          `Esta factura no generará tickets ni acumulará saldo.`,
-          { duration: 7000 }
-        );
-        entregablesCalculados = 0;
-      } else if (entregablesCalculados > ticketsRestantes) {
-        toast.warning(
-          `Solo se generarán ${ticketsRestantes} ticket(s) más (tope de ${maxTicketsPromocion} para esta promoción). ` +
-          `El excedente no acumula saldo.`,
-          { duration: 7000 }
-        );
-        entregablesCalculados = ticketsRestantes;
-      } else if (monto > valorMaximo) {
-        toast.warning(
-          `El monto ($${monto.toFixed(2)}) supera el máximo del evento ($${valorMaximo.toFixed(2)}). ` +
-          `Se generarán ${entregablesCalculados} ticket(s) (tope por factura). ` +
-          `El excedente no acumula saldo para esta promoción.`,
-          { duration: 6000 }
-        );
-      }
-    }
-
-    setMetodosPago([
+    const nuevosMetodos = [
       ...metodosPago,
       {
         id: metodoSeleccionado,
@@ -462,9 +457,21 @@ export function Registro() {
         cuponId: cuponId,
         cuponNombre: cuponNombre,
         cuponNumero: cuponNumero,
-        entregablesCalculados: entregablesCalculados,
+        entregablesCalculados: 0,
       },
-    ]);
+    ];
+    const cuponNumeroFactura = metodosPago[0]?.cuponNumero ?? cuponNumero;
+    const resultadoFactura = calcularResultadoFactura(evento, totalActual + monto, saldoAnterior, cuponNumeroFactura);
+
+    if (resultadoFactura.excedenteDescartado > 0) {
+      toast.warning(
+        `Esta factura supera el máximo de la campaña. ` +
+        `Se generarán ${resultadoFactura.tickets} ticket(s) y $${resultadoFactura.excedenteDescartado.toFixed(2)} no acumulará saldo.`,
+        { duration: 6000 }
+      );
+    }
+
+    setMetodosPago(distribuirEntregablesEnMetodos(nuevosMetodos, resultadoFactura.tickets));
 
     setMetodoSeleccionado('');
     setCuponSeleccionado('');
@@ -661,17 +668,22 @@ export function Registro() {
     const eventoNombre = eventoSeleccionado?.nombre || '';
     const eventoValorMinimo = eventoSeleccionado?.valor_minimo || 0;
     const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
+    const cuponNumeroFactura = metodosPago[0]?.cuponNumero ?? 1;
+    const resultadoFactura = calcularResultadoFactura(
+      eventoSeleccionado,
+      montoTotalNum,
+      saldoAnterior,
+      cuponNumeroFactura
+    );
+    const metodosPagoCalculados = distribuirEntregablesEnMetodos(metodosPago, resultadoFactura.tickets);
 
-    const eventoValorMinimoLocal = eventoSeleccionado?.valor_minimo ?? 1;
-    const eventoValorMaximoLocal = eventoSeleccionado?.valor_maximo ?? 0;
-    const primerMontoRaw = metodosPago[0]?.monto ?? 0;
-    const primerMonto = eventoValorMaximoLocal > 0 && primerMontoRaw > eventoValorMaximoLocal
-      ? eventoValorMaximoLocal
-      : primerMontoRaw;
-    const nuevoSaldo = parseFloat((
-      (primerMonto + saldoAnterior) % eventoValorMinimoLocal +
-      metodosPago.slice(1).reduce((acc, m) => acc + (m.monto % eventoValorMinimoLocal), 0)
-    ).toFixed(2));
+    if (resultadoFactura.excedenteDescartado > 0) {
+      toast.warning(
+        `La factura ${numeroFactura.trim()} supera el máximo de la campaña. ` +
+        `$${resultadoFactura.excedenteDescartado.toFixed(2)} no se acumulará como saldo.`,
+        { duration: 6000 }
+      );
+    }
 
     const nuevaFactura: FacturaPendiente = {
       id: Date.now() + Math.floor(Math.random() * 10000),
@@ -690,14 +702,14 @@ export function Registro() {
       numeroFactura: numeroFactura.trim(),
       montoTotal: montoTotalNum,
       fechaEmision,
-      metodosPago: [...metodosPago],
-      totalEntregables: metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0),
-      cuponAplicado: obtenerCuponAplicado(metodosPago),
+      metodosPago: metodosPagoCalculados,
+      totalEntregables: resultadoFactura.tickets,
+      cuponAplicado: obtenerCuponAplicado(metodosPagoCalculados),
       saldoAnterior,
-      saldoNuevo: nuevoSaldo,
+      saldoNuevo: resultadoFactura.saldoNuevo,
     };
     setFacturasPendientes([nuevaFactura, ...facturasPendientes]);
-    setSaldoAnterior(nuevoSaldo);
+    setSaldoAnterior(resultadoFactura.saldoNuevo);
     limpiarFactura();
   };
 

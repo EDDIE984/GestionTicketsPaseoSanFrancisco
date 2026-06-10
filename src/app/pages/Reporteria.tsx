@@ -87,6 +87,25 @@ function parseNumber(value: number | string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function aplicarFormatoNumericoExcel(
+  worksheet: XLSX.WorkSheet,
+  rows: Array<Record<string, unknown>>,
+  columnName: string,
+  format: string
+) {
+  if (rows.length === 0) return;
+  const columnIndex = Object.keys(rows[0]).indexOf(columnName);
+  if (columnIndex < 0) return;
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: rowIndex + 1 });
+    const cell = worksheet[cellAddress];
+    if (!cell) continue;
+    cell.t = 'n';
+    cell.z = format;
+  }
+}
+
 function getDateParts(dateValue: string) {
   const [year, month, day] = dateValue.slice(0, 10).split('-').map(Number);
 
@@ -309,10 +328,10 @@ export function Reporteria() {
         Dirección: factura.clientes?.direccion ?? '',
         Género: factura.clientes?.genero ?? '',
         Factura: factura.numero_factura,
-        'Monto factura': formatMiles(factura.monto_total, 2),
+        'Monto factura': parseNumber(factura.monto_total),
         'Fecha emisión': factura.fecha_emision,
         'Fecha creación': formatDate(factura.fecha_registro),
-        'Total entregables': formatMiles(factura.total_entregables),
+        'Total entregables': parseNumber(factura.total_entregables),
         'Tickets impresos': factura.tickets_impresos ? 'Sí' : 'No',
         'Fecha impresión': formatDate(factura.tickets_impresos_at),
         'Acepta términos y condiciones': consentimiento?.acepta_proteccion_datos ? 'Sí' : 'No',
@@ -336,6 +355,8 @@ export function Reporteria() {
     }
 
     const worksheet = XLSX.utils.json_to_sheet(rowsExcel);
+    aplicarFormatoNumericoExcel(worksheet, rowsExcel, 'Monto factura', '#,##0.00');
+    aplicarFormatoNumericoExcel(worksheet, rowsExcel, 'Total entregables', '#,##0');
     worksheet['!cols'] = Object.keys(rowsExcel[0]).map((key) => ({
       wch: Math.max(key.length + 2, 16),
     }));
