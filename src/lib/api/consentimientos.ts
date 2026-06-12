@@ -17,7 +17,8 @@ export async function enviarConsentimientoCliente(clienteId: string, facturaIds:
   });
 
   if (!response.ok) {
-    throw new Error('ConsentimientoEmailFailed');
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail?.hint || data.message || 'No se pudo enviar el correo de consentimiento');
   }
 
   return response.json() as Promise<{ sent?: boolean; skipped?: boolean; reason?: string }>;

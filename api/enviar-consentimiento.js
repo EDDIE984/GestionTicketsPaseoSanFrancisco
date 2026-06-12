@@ -3,6 +3,23 @@ import { createServerSupabase, getAppUrl } from './_supabase.js';
 import { sendMail } from './_mail.js';
 
 const EXPIRATION_DAYS = 7;
+const CONSENT_SUBJECT = 'Confirma tu autorización para el tratamiento de datos personales';
+
+function getErrorHint(error) {
+  if (error?.code === 'GRAPH_AUTH') {
+    return 'No se pudo autenticar con Microsoft 365. Verifica el Tenant ID, Client ID y Client Secret.';
+  }
+  if (error?.code === 'GRAPH_SEND') {
+    if (error?.status === 403) {
+      return 'La aplicación no tiene permiso Mail.Send o falta conceder el consentimiento del administrador.';
+    }
+    if (error?.status === 404) {
+      return 'El correo remitente no existe en el tenant de Microsoft 365.';
+    }
+    return 'Microsoft Graph rechazó el envío. Revisa el remitente y los permisos de la aplicación.';
+  }
+  return 'Revisa la parametrización activa de correo y vuelve a intentar.';
+}
 
 function addDays(date, days) {
   const copy = new Date(date);
@@ -89,7 +106,7 @@ export default async function handler(request, response) {
       from: `"${config.nombre_remitente}" <${config.correo_remitente}>`,
       to: cliente.correo,
       replyTo: config.responder_a ?? config.correo_remitente,
-      subject: config.asunto_prueba || 'Confirma tus preferencias de comunicación',
+      subject: CONSENT_SUBJECT,
       html: `
         <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
           <p>Hola ${nombreCompleto},</p>
@@ -117,6 +134,14 @@ export default async function handler(request, response) {
 
     return response.status(200).json({ sent: true });
   } catch (error) {
-    return response.status(500).json({ message: 'No se pudo enviar el consentimiento' });
+    console.error('Error al enviar consentimiento', error);
+    return response.status(500).json({
+      message: 'No se pudo enviar el consentimiento',
+      detail: {
+        code: error?.code ?? null,
+        status: error?.status ?? null,
+        hint: getErrorHint(error),
+      },
+    });
   }
 }

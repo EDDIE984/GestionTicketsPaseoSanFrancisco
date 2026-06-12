@@ -829,7 +829,8 @@ export function Registro() {
           })
         ).catch((error) => {
           console.error('No se pudo enviar el consentimiento', error);
-          toast.error('Las facturas se registraron, pero no se pudo enviar el correo de consentimiento');
+          const detalle = error instanceof Error ? error.message : 'No se pudo identificar el error';
+          toast.error(`Las facturas se registraron, pero no se pudo enviar el correo de consentimiento. ${detalle}`);
         }),
         fetchFacturasDelDia()
           .then(setFacturas)
