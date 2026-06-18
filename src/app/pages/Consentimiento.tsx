@@ -13,8 +13,8 @@ const POLITICA_URL =
 export function Consentimiento() {
   const { token } = useParams();
   const [data, setData] = useState<ConsentimientoPublico | null>(null);
-  const [aceptaPublicidad, setAceptaPublicidad] = useState(true);
-  const [aceptaProteccionDatos, setAceptaProteccionDatos] = useState(true);
+  const [aceptaPublicidad, setAceptaPublicidad] = useState(false);
+  const [aceptaProteccionDatos, setAceptaProteccionDatos] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
@@ -31,8 +31,8 @@ export function Consentimiento() {
       try {
         const consentimiento = await fetchConsentimiento(token);
         setData(consentimiento);
-        setAceptaPublicidad(consentimiento.acepta_publicidad ?? true);
-        setAceptaProteccionDatos(consentimiento.acepta_proteccion_datos ?? true);
+        setAceptaPublicidad(consentimiento.acepta_publicidad ?? false);
+        setAceptaProteccionDatos(consentimiento.acepta_proteccion_datos ?? false);
         setGuardado(Boolean(consentimiento.fecha_aceptacion));
       } catch (err) {
         const status = err instanceof Error ? err.message : '';
@@ -47,10 +47,6 @@ export function Consentimiento() {
 
   const enviar = async () => {
     if (!token) return;
-    if (!aceptaProteccionDatos) {
-      setError('Debes aceptar la política de protección de datos para continuar.');
-      return;
-    }
 
     setError('');
     setGuardando(true);
@@ -81,7 +77,7 @@ export function Consentimiento() {
           <CardHeader>
             <CardTitle>Confirmación de preferencias</CardTitle>
             <CardDescription>
-              Revisa tus datos y confirma la autorización para completar el registro.
+              Revisa tus datos y confirma el consentimiento para completar el registro.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -130,8 +126,8 @@ export function Consentimiento() {
                           onCheckedChange={(checked) => setAceptaPublicidad(Boolean(checked))}
                         />
                         <Label htmlFor="publicidad" className="cursor-pointer leading-relaxed text-slate-800">
-                          Acepto recibir material publicitario relacionado con productos y servicios relevantes de terceros,
-                          por e-mail (opcional)
+                          Acepto recibir material publicitario sobre productos y servicios, y autorizo que se realicen
+                          procesos de perfilamiento sobre mis datos para el envío de publicidad personalizada.
                         </Label>
                       </div>
 
@@ -141,9 +137,31 @@ export function Consentimiento() {
                           checked={aceptaProteccionDatos}
                           onCheckedChange={(checked) => setAceptaProteccionDatos(Boolean(checked))}
                         />
-                        <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
-                          He leído y acepto la política de protección de datos
-                        </Label>
+                        <div className="space-y-3">
+                          <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
+                            He leído y acepto la política de protección de datos
+                          </Label>
+                          <div className="flex flex-wrap gap-3">
+                            <a
+                              href={POLITICA_URL}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
+                            >
+                              Ver política
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                            <a
+                              href={POLITICA_URL}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
+                            >
+                              Ver consentimiento
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -153,28 +171,8 @@ export function Consentimiento() {
                       </div>
                     )}
 
-                    <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-wrap gap-3">
-                        <a
-                          href={POLITICA_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
-                        >
-                          Ver política
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                        <a
-                          href={POLITICA_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
-                        >
-                          Abrir documento
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      </div>
-                      <Button onClick={enviar} disabled={guardando || !aceptaProteccionDatos}>
+                    <div className="flex justify-end border-t border-slate-200 pt-4">
+                      <Button onClick={enviar} disabled={guardando}>
                         {guardando && <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />}
                         Enviar aceptación
                       </Button>

@@ -3,7 +3,7 @@ import { createServerSupabase, getAppUrl } from './_supabase.js';
 import { sendMail } from './_mail.js';
 
 const EXPIRATION_DAYS = 7;
-const CONSENT_SUBJECT = 'Confirma tu autorización para el tratamiento de datos personales';
+const CONSENT_SUBJECT = 'Confirma tu consentimiento para el tratamiento de datos personales';
 
 function getErrorHint(error) {
   if (error?.code === 'GRAPH_AUTH') {
@@ -110,6 +110,7 @@ export default async function handler(request, response) {
       html: `
         <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
           <p>Hola ${nombreCompleto},</p>
+          <p>Al participar, aceptas los términos y condiciones del sorteo, publicados en la web <a href="https://paseosanfrancisco.ec/">https://paseosanfrancisco.ec/</a>.</p>
           <p>Para completar tu registro, revisa y confirma tus preferencias en el siguiente enlace:</p>
           <p>
             <a href="${consentimientoUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:12px 18px;border-radius:6px;text-decoration:none;">
@@ -119,7 +120,7 @@ export default async function handler(request, response) {
           <p>Este enlace estará disponible durante ${EXPIRATION_DAYS} días.</p>
         </div>
       `,
-      text: `Hola ${nombreCompleto}, completa el formulario en: ${consentimientoUrl}. Este enlace vence en ${EXPIRATION_DAYS} días.`,
+      text: `Hola ${nombreCompleto},\n\nAl participar, aceptas los términos y condiciones del sorteo, publicados en la web https://paseosanfrancisco.ec/.\n\nCompleta el formulario en: ${consentimientoUrl}. Este enlace vence en ${EXPIRATION_DAYS} días.`,
     });
 
     const { error: sentError } = await supabase

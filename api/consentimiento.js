@@ -30,8 +30,8 @@ export default async function handler(request, response) {
 
   if (request.method === 'POST') {
     const { token, aceptaPublicidad, aceptaProteccionDatos } = request.body ?? {};
-    if (!token || !aceptaProteccionDatos) {
-      return response.status(400).json({ message: 'Debes aceptar la política de protección de datos' });
+    if (!token) {
+      return response.status(400).json({ message: 'Token inválido' });
     }
 
     const { data: existing, error: existingError } = await supabase
@@ -51,7 +51,7 @@ export default async function handler(request, response) {
       .from('formularios_consentimiento')
       .update({
         acepta_publicidad: Boolean(aceptaPublicidad),
-        acepta_proteccion_datos: true,
+        acepta_proteccion_datos: Boolean(aceptaProteccionDatos),
         fecha_aceptacion: existing.fecha_aceptacion ?? now,
         formulario_enviado_at: now,
         ip: request.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? request.socket?.remoteAddress ?? null,
