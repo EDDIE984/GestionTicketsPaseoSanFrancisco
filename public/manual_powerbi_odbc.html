@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Manual de conexión ODBC para Power BI</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --ink: #172033;
+        --muted: #5b6475;
+        --line: #dce2ee;
+        --brand: #176b87;
+        --brand-soft: #e7f4f7;
+        --code: #111827;
+        --code-bg: #eef2f7;
+        --warn: #8a5a00;
+        --warn-bg: #fff7df;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+        line-height: 1.55;
+      }
+
+      main {
+        width: min(980px, calc(100% - 32px));
+        margin: 32px auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 32px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.2;
+        margin: 0 0 12px;
+      }
+
+      h1 {
+        font-size: 30px;
+      }
+
+      h2 {
+        border-top: 1px solid var(--line);
+        font-size: 22px;
+        margin-top: 28px;
+        padding-top: 24px;
+      }
+
+      h3 {
+        font-size: 17px;
+        margin-top: 20px;
+      }
+
+      p {
+        margin: 0 0 14px;
+      }
+
+      ol,
+      ul {
+        margin: 0 0 16px 22px;
+        padding: 0;
+      }
+
+      li {
+        margin: 8px 0;
+      }
+
+      code,
+      .value {
+        background: var(--code-bg);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        color: var(--code);
+        font-family: Consolas, Monaco, "Courier New", monospace;
+        padding: 2px 6px;
+      }
+
+      table {
+        border-collapse: collapse;
+        margin: 14px 0 20px;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border: 1px solid var(--line);
+        padding: 10px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--brand-soft);
+        color: var(--ink);
+      }
+
+      .intro {
+        color: var(--muted);
+        font-size: 15px;
+        margin-top: 8px;
+      }
+
+      .note {
+        background: var(--brand-soft);
+        border: 1px solid #b9dfe7;
+        border-radius: 8px;
+        margin: 18px 0;
+        padding: 14px 16px;
+      }
+
+      .warning {
+        background: var(--warn-bg);
+        border: 1px solid #f2d28a;
+        border-radius: 8px;
+        color: var(--warn);
+        margin: 18px 0;
+        padding: 14px 16px;
+      }
+
+      .checklist {
+        list-style: none;
+        margin-left: 0;
+      }
+
+      .checklist li::before {
+        color: var(--brand);
+        content: "✓ ";
+        font-weight: 700;
+      }
+
+      .footer {
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 28px;
+        padding-top: 18px;
+      }
+
+      @media print {
+        body {
+          background: #ffffff;
+        }
+
+        main {
+          border: 0;
+          margin: 0;
+          max-width: none;
+          padding: 20px;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Manual de conexión ODBC para Power BI</h1>
+      <p class="intro">
+        Este documento explica cómo configurar la conexión ODBC hacia Supabase/PostgreSQL y cómo abrir el archivo de Power BI
+        preparado para Paseo San Francisco.
+      </p>
+
+      <div class="warning">
+        <strong>Importante:</strong> este manual contiene credenciales de conexión. Compártalo únicamente con personas autorizadas.
+      </div>
+
+      <h2>1. Requisitos</h2>
+      <ul class="checklist">
+        <li>Windows con Power BI Desktop instalado.</li>
+        <li>Permisos para instalar controladores ODBC.</li>
+        <li>Archivo de Power BI entregado: <span class="value">PaseoSanFrancisco.pbix</span> o <span class="value">PaseoSanFrancisco.pbit</span>.</li>
+        <li>Conexión a internet para acceder a Supabase.</li>
+      </ul>
+
+      <h2>2. Instalar el controlador ODBC de PostgreSQL</h2>
+      <ol>
+        <li>Descargue el instalador de PostgreSQL ODBC desde <span class="value">https://www.postgresql.org/ftp/odbc/releases/</span>.</li>
+        <li>Seleccione el instalador de 64 bits, normalmente llamado <span class="value">psqlodbc_x64.msi</span>.</li>
+        <li>Ejecute el instalador y complete el proceso con las opciones predeterminadas.</li>
+        <li>Cierre Power BI Desktop si estaba abierto y vuelva a abrirlo después de instalar el controlador.</li>
+      </ol>
+
+      <h2>3. Crear el origen de datos ODBC</h2>
+      <ol>
+        <li>En Windows, busque y abra <strong>ODBC Data Sources (64-bit)</strong> o <strong>Orígenes de datos ODBC (64 bits)</strong>.</li>
+        <li>Abra la pestaña <strong>System DSN</strong> o <strong>DSN de sistema</strong>.</li>
+        <li>Haga clic en <strong>Add</strong> o <strong>Agregar</strong>.</li>
+        <li>Seleccione <strong>PostgreSQL ODBC Driver(UNICODE)</strong> y haga clic en <strong>Finish</strong>.</li>
+      </ol>
+
+      <h3>Datos de conexión</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Campo</th>
+            <th>Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Data Source / Name</td>
+            <td><span class="value">Supabase PowerBI</span></td>
+          </tr>
+          <tr>
+            <td>Database</td>
+            <td><span class="value">postgres</span></td>
+          </tr>
+          <tr>
+            <td>Server</td>
+            <td><span class="value">aws-1-us-west-2.pooler.supabase.com</span></td>
+          </tr>
+          <tr>
+            <td>Port</td>
+            <td><span class="value">6543</span></td>
+          </tr>
+          <tr>
+            <td>User Name</td>
+            <td><span class="value">postgres.cgzylyeoepdsgxzywicv</span></td>
+          </tr>
+          <tr>
+            <td>Password</td>
+            <td><span class="value">Usuario2005$</span></td>
+          </tr>
+          <tr>
+            <td>SSL Mode</td>
+            <td><span class="value">require</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        Si el formulario del controlador no muestra <strong>SSL Mode</strong> en la pantalla principal, revise las opciones avanzadas,
+        la pestaña <strong>Options</strong> o la pestaña <strong>Datasource</strong>, según la versión instalada del controlador.
+      </div>
+
+      <ol start="5">
+        <li>Haga clic en <strong>Test</strong> o <strong>Probar</strong>.</li>
+        <li>Si la prueba es exitosa, haga clic en <strong>Save</strong>, <strong>OK</strong> o <strong>Aceptar</strong>.</li>
+      </ol>
+
+      <h2>4. Abrir el archivo en Power BI Desktop</h2>
+      <ol>
+        <li>Abra Power BI Desktop.</li>
+        <li>Abra el archivo entregado: <span class="value">PaseoSanFrancisco.pbix</span> o <span class="value">PaseoSanFrancisco.pbit</span>.</li>
+        <li>Si Power BI solicita credenciales para el origen ODBC, seleccione <strong>Base de datos</strong>.</li>
+        <li>Ingrese el usuario y contraseña indicados en la sección de datos de conexión.</li>
+        <li>Deje vacío el campo <strong>Propiedades de la cadena de conexión de credenciales</strong>.</li>
+        <li>Haga clic en <strong>Conectar</strong>.</li>
+      </ol>
+
+      <h2>5. Conectar desde cero en Power BI Desktop</h2>
+      <p>Si necesita crear la conexión manualmente desde Power BI Desktop:</p>
+      <ol>
+        <li>Seleccione <strong>Inicio &gt; Obtener datos &gt; Más...</strong>.</li>
+        <li>Seleccione <strong>ODBC</strong>.</li>
+        <li>En el listado de DSN, seleccione <span class="value">Supabase PowerBI</span>.</li>
+        <li>Seleccione el modo <strong>Importar</strong>.</li>
+        <li>Cuando aparezca el navegador, seleccione únicamente las vistas que empiezan con <span class="value">vw_powerbi_</span>.</li>
+        <li>Haga clic en <strong>Cargar</strong>.</li>
+      </ol>
+
+      <h3>Vistas disponibles para reportes</h3>
+      <ul>
+        <li><span class="value">vw_powerbi_facturas_detalle</span></li>
+        <li><span class="value">vw_powerbi_metodos_pago_detalle</span></li>
+        <li><span class="value">vw_powerbi_consentimientos</span></li>
+        <li><span class="value">vw_powerbi_eventos_configuracion</span></li>
+        <li><span class="value">vw_powerbi_saldos_clientes</span></li>
+        <li><span class="value">vw_powerbi_historial_saldo</span></li>
+        <li><span class="value">vw_powerbi_resumen_evento_diario</span></li>
+        <li><span class="value">vw_powerbi_trafico_ingresos_diarios</span></li>
+        <li><span class="value">vw_powerbi_reversos_facturas</span></li>
+      </ul>
+
+      <h2>6. Actualizar datos</h2>
+      <ol>
+        <li>Abra el archivo de Power BI.</li>
+        <li>Verifique que el origen ODBC <span class="value">Supabase PowerBI</span> exista en el equipo.</li>
+        <li>En Power BI Desktop, haga clic en <strong>Actualizar</strong>.</li>
+        <li>Espere a que finalice la carga de datos.</li>
+      </ol>
+
+      <h2>7. Solución de problemas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Problema</th>
+            <th>Solución sugerida</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>No aparece el controlador PostgreSQL ODBC</td>
+            <td>Instale el controlador <span class="value">psqlodbc_x64.msi</span> y abra el administrador ODBC de 64 bits.</td>
+          </tr>
+          <tr>
+            <td>Error de certificado SSL</td>
+            <td>Use ODBC con <span class="value">SSL Mode = require</span>.</td>
+          </tr>
+          <tr>
+            <td>Falla la autenticación</td>
+            <td>Revise que el usuario sea <span class="value">postgres.cgzylyeoepdsgxzywicv</span> y que la contraseña esté escrita exactamente igual.</td>
+          </tr>
+          <tr>
+            <td>No se ven las vistas</td>
+            <td>Confirme que se seleccionó la base <span class="value">postgres</span> y el DSN <span class="value">Supabase PowerBI</span>.</td>
+          </tr>
+          <tr>
+            <td>El reporte no actualiza</td>
+            <td>Verifique conexión a internet, credenciales ODBC y permisos del origen de datos en Power BI.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="footer">
+        Documento preparado para la conexión de Power BI Desktop con Supabase/PostgreSQL mediante ODBC.
+      </p>
+    </main>
+  </body>
+</html>
