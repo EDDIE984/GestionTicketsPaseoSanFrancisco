@@ -91,6 +91,8 @@ export default async function handler(request, response) {
       telefono: cliente.telefono,
       token,
       token_expira_at: expiresAt,
+      acepta_publicidad: false,
+      acepta_proteccion_datos: false,
       correo_enviado_at: null,
       updated_at: now.toISOString(),
     };

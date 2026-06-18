@@ -30,10 +30,11 @@ export function Consentimiento() {
 
       try {
         const consentimiento = await fetchConsentimiento(token);
+        const yaFueGuardado = Boolean(consentimiento.fecha_aceptacion);
         setData(consentimiento);
-        setAceptaPublicidad(consentimiento.acepta_publicidad ?? false);
-        setAceptaProteccionDatos(consentimiento.acepta_proteccion_datos ?? false);
-        setGuardado(Boolean(consentimiento.fecha_aceptacion));
+        setAceptaPublicidad(yaFueGuardado ? Boolean(consentimiento.acepta_publicidad) : false);
+        setAceptaProteccionDatos(yaFueGuardado ? Boolean(consentimiento.acepta_proteccion_datos) : false);
+        setGuardado(yaFueGuardado);
       } catch (err) {
         const status = err instanceof Error ? err.message : '';
         setError(status === '410' ? 'Este enlace expiró.' : 'No pudimos cargar el formulario.');
