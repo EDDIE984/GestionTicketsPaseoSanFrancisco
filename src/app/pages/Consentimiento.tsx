@@ -98,17 +98,17 @@ export function Consentimiento() {
             {data && (
               <>
                 <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-500">Nombre</p>
-                    <p className="font-medium text-slate-900">{data.nombre}</p>
+                    <p className="break-words font-medium text-slate-900">{data.nombre}</p>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-500">Correo</p>
-                    <p className="font-medium text-slate-900">{data.correo}</p>
+                    <p className="break-all font-medium text-slate-900">{data.correo}</p>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-slate-500">Teléfono</p>
-                    <p className="font-medium text-slate-900">{data.telefono || 'No registrado'}</p>
+                    <p className="break-words font-medium text-slate-900">{data.telefono || 'No registrado'}</p>
                   </div>
                 </div>
 
