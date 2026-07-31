@@ -50,8 +50,8 @@ export default async function handler(request, response) {
     const { error: updateError } = await supabase
       .from('formularios_consentimiento')
       .update({
-        acepta_publicidad: Boolean(aceptaPublicidad),
-        acepta_proteccion_datos: Boolean(aceptaProteccionDatos),
+        acepta_publicidad: aceptaPublicidad === true,
+        acepta_proteccion_datos: aceptaProteccionDatos === true,
         fecha_aceptacion: existing.fecha_aceptacion ?? now,
         formulario_enviado_at: now,
         ip: request.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? request.socket?.remoteAddress ?? null,

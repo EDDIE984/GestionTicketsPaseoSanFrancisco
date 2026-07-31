@@ -817,7 +817,6 @@ export function Registro() {
       setFacturasPendientes([]);
       setMostrarDialogoTickets(true);
       setTicketsImpresos(false);
-      limpiarCliente();
 
       void Promise.all([
         Promise.all(
@@ -971,6 +970,7 @@ export function Registro() {
         .then(async () => {
           await marcarFacturasComoImpresas(facturaIds);
           setTicketsImpresos(true);
+          limpiarCliente();
           const actualizadas = await fetchFacturasDelDia();
           setFacturas(actualizadas);
           toast.success(`Tickets impresos correctamente (${job.totalTickets})`);

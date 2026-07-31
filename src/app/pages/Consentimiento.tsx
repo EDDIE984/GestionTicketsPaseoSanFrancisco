@@ -14,7 +14,7 @@ export function Consentimiento() {
   const { token } = useParams();
   const [data, setData] = useState<ConsentimientoPublico | null>(null);
   const [aceptaPublicidad, setAceptaPublicidad] = useState(false);
-  const [aceptaProteccionDatos, setAceptaProteccionDatos] = useState(false);
+  const [aceptaProteccionDatos, setAceptaProteccionDatos] = useState(true);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
@@ -33,7 +33,7 @@ export function Consentimiento() {
         const yaFueGuardado = Boolean(consentimiento.fecha_aceptacion);
         setData(consentimiento);
         setAceptaPublicidad(yaFueGuardado ? Boolean(consentimiento.acepta_publicidad) : false);
-        setAceptaProteccionDatos(yaFueGuardado ? Boolean(consentimiento.acepta_proteccion_datos) : false);
+        setAceptaProteccionDatos(yaFueGuardado ? Boolean(consentimiento.acepta_proteccion_datos) : true);
         setGuardado(yaFueGuardado);
       } catch (err) {
         const status = err instanceof Error ? err.message : '';
@@ -112,74 +112,72 @@ export function Consentimiento() {
                   </div>
                 </div>
 
-                {guardado ? (
+                {guardado && (
                   <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-4 text-green-800">
                     <CheckCircle2 className="h-5 w-5" />
-                    Tu aceptación fue registrada correctamente.
+                    Tus preferencias están guardadas. Puedes modificarlas y volver a guardar.
                   </div>
-                ) : (
-                  <>
-                    <div className="space-y-4">
-                      <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
-                        <Checkbox
-                          id="publicidad"
-                          checked={aceptaPublicidad}
-                          onCheckedChange={(checked) => setAceptaPublicidad(Boolean(checked))}
-                        />
-                        <Label htmlFor="publicidad" className="cursor-pointer leading-relaxed text-slate-800">
-                          Acepto recibir material publicitario sobre productos y servicios, y autorizo que se realicen
-                          procesos de perfilamiento sobre mis datos para el envío de publicidad personalizada.
-                        </Label>
-                      </div>
-
-                      <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
-                        <Checkbox
-                          id="proteccionDatos"
-                          checked={aceptaProteccionDatos}
-                          onCheckedChange={(checked) => setAceptaProteccionDatos(Boolean(checked))}
-                        />
-                        <div className="space-y-3">
-                          <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
-                            He leído y acepto la política de protección de datos
-                          </Label>
-                          <div className="flex flex-wrap gap-3">
-                            <a
-                              href={POLITICA_URL}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
-                            >
-                              Ver política
-                              <ExternalLink className="h-4 w-4" />
-                            </a>
-                            <a
-                              href={POLITICA_URL}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
-                            >
-                              Ver consentimiento
-                              <ExternalLink className="h-4 w-4" />
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {error && (
-                      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {error}
-                      </div>
-                    )}
-
-                    <div className="flex justify-end border-t border-slate-200 pt-4">
-                      <Button onClick={enviar} disabled={guardando}>
-                        {guardando && <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />}
-                        Enviar aceptación
-                      </Button>
-                    </div>
-                  </>
                 )}
+
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
+                    <Checkbox
+                      id="publicidad"
+                      checked={aceptaPublicidad}
+                      onCheckedChange={(checked) => setAceptaPublicidad(Boolean(checked))}
+                    />
+                    <Label htmlFor="publicidad" className="cursor-pointer leading-relaxed text-slate-800">
+                      Acepto recibir material publicitario sobre productos y servicios, y autorizo que se realicen
+                      procesos de perfilamiento sobre mis datos para el envío de publicidad personalizada.
+                    </Label>
+                  </div>
+
+                  <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
+                    <Checkbox
+                      id="proteccionDatos"
+                      checked={aceptaProteccionDatos}
+                      onCheckedChange={(checked) => setAceptaProteccionDatos(Boolean(checked))}
+                    />
+                    <div className="space-y-3">
+                      <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
+                        He leído y acepto la política de protección de datos
+                      </Label>
+                      <div className="flex flex-wrap gap-3">
+                        <a
+                          href={POLITICA_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
+                        >
+                          Ver política
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                        <a
+                          href={POLITICA_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
+                        >
+                          Ver consentimiento
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex justify-end border-t border-slate-200 pt-4">
+                  <Button onClick={enviar} disabled={guardando}>
+                    {guardando && <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />}
+                    {guardado ? 'Actualizar preferencias' : 'Enviar aceptación'}
+                  </Button>
+                </div>
               </>
             )}
           </CardContent>

@@ -693,6 +693,7 @@ export function Reporteria() {
                           <TableHead>Monto</TableHead>
                           <TableHead>Entregables</TableHead>
                           <TableHead>Términos</TableHead>
+                          <TableHead>Fecha aceptación</TableHead>
                           <TableHead>Fecha creación</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -712,6 +713,7 @@ export function Reporteria() {
                               <TableCell>{formatMoney(factura.monto_total)}</TableCell>
                               <TableCell>{formatMiles(factura.total_entregables)}</TableCell>
                               <TableCell>{consentimiento?.acepta_proteccion_datos ? 'Sí' : 'No'}</TableCell>
+                              <TableCell className="whitespace-nowrap">{formatDate(consentimiento?.fecha_aceptacion)}</TableCell>
                               <TableCell>{formatDate(factura.fecha_registro)}</TableCell>
                             </TableRow>
                           );

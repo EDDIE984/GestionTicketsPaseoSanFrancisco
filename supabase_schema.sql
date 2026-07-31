@@ -165,7 +165,7 @@ CREATE TABLE formularios_consentimiento (
   correo_enviado_at        TIMESTAMPTZ,
   formulario_enviado_at    TIMESTAMPTZ,
   acepta_publicidad        BOOLEAN NOT NULL DEFAULT true,
-  acepta_proteccion_datos  BOOLEAN NOT NULL DEFAULT false,
+  acepta_proteccion_datos  BOOLEAN NOT NULL DEFAULT true,
   fecha_aceptacion         TIMESTAMPTZ,
   ip                       TEXT,
   user_agent               TEXT,
