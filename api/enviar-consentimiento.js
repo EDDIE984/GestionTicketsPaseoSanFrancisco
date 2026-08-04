@@ -33,9 +33,12 @@ export default async function handler(request, response) {
     return response.status(405).json({ message: 'Method not allowed' });
   }
 
-  const { clienteId, facturaIds = [] } = request.body ?? {};
+  const { clienteId, facturaIds } = request.body ?? {};
   if (!clienteId) {
     return response.status(400).json({ message: 'clienteId is required' });
+  }
+  if (!Array.isArray(facturaIds) || facturaIds.length === 0) {
+    return response.status(400).json({ message: 'Se requiere al menos una factura impresa' });
   }
 
   try {
@@ -51,14 +54,44 @@ export default async function handler(request, response) {
       return response.status(400).json({ message: 'Cliente sin correo disponible' });
     }
 
+    const idsUnicos = [...new Set(facturaIds.filter((id) => typeof id === 'string' && id))];
+    if (idsUnicos.length !== facturaIds.length) {
+      return response.status(400).json({ message: 'La lista de facturas contiene valores inválidos o duplicados' });
+    }
+
+    const { data: facturas, error: facturasError } = await supabase
+      .from('facturas')
+      .select('id, cliente_id, tickets_impresos')
+      .in('id', idsUnicos);
+
+    if (facturasError) throw facturasError;
+    if (
+      facturas?.length !== idsUnicos.length ||
+      facturas.some((factura) => factura.cliente_id !== clienteId)
+    ) {
+      return response.status(400).json({ message: 'Las facturas no existen o no pertenecen al cliente' });
+    }
+    if (facturas.some((factura) => !factura.tickets_impresos)) {
+      return response.status(409).json({ message: 'No se puede enviar el consentimiento antes de confirmar la impresión' });
+    }
+
     const { data: existing, error: existingError } = await supabase
       .from('formularios_consentimiento')
-      .select('id, fecha_aceptacion')
+      .select('id, fecha_aceptacion, factura_ids')
       .eq('cliente_id', clienteId)
       .maybeSingle();
 
     if (existingError) throw existingError;
+    const facturaIdsAcumuladas = [...new Set([...(existing?.factura_ids ?? []), ...idsUnicos])];
     if (existing?.fecha_aceptacion) {
+      const { error: updateError } = await supabase
+        .from('formularios_consentimiento')
+        .update({
+          factura_ids: facturaIdsAcumuladas,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+      if (updateError) throw updateError;
       return response.status(200).json({ skipped: true, reason: 'accepted' });
     }
 
@@ -84,7 +117,7 @@ export default async function handler(request, response) {
 
     const payload = {
       cliente_id: cliente.id,
-      factura_ids: facturaIds,
+      factura_ids: facturaIdsAcumuladas,
       cedula: cliente.cedula,
       nombre: nombreCompleto,
       correo: cliente.correo,

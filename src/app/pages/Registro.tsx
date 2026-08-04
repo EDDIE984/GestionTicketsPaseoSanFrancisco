@@ -70,6 +70,7 @@ interface MetodoPagoLocal {
 interface FacturaPendiente {
   id: number;
   facturaId?: string;
+  clienteId?: string;
   eventoNombre: string;
   eventoId: string;
   eventoValorMinimo: number;
@@ -821,7 +822,6 @@ export function Registro() {
         return;
       }
 
-      const consentimientosPendientes = new Map<string, string[]>();
       const facturasRegistradas: FacturaPendiente[] = [];
       const clientesPorCedula = new Map<string, Awaited<ReturnType<typeof upsertCliente>>>();
 
@@ -878,12 +878,10 @@ export function Registro() {
           toast.warning('Factura registrada, pero no se pudo guardar el saldo. Verifica que las tablas de saldo existen en Supabase.');
         }
 
-        const facturaIds = consentimientosPendientes.get(cliente.id) ?? [];
-        facturaIds.push(factura.id);
-        consentimientosPendientes.set(cliente.id, facturaIds);
         facturasRegistradas.push({
           ...fp,
           facturaId: factura.id,
+          clienteId: cliente.id,
           fechaRegistro: factura.fecha_registro,
         });
       }
@@ -900,18 +898,6 @@ export function Registro() {
       setTicketsImpresos(false);
 
       void Promise.all([
-        Promise.all(
-          Array.from(consentimientosPendientes.entries()).map(async ([clienteId, facturaIds]) => {
-            const result = await enviarConsentimientoCliente(clienteId, facturaIds);
-            if (result.skipped) {
-              toast.info('El cliente ya aceptó la política de protección de datos');
-            }
-          })
-        ).catch((error) => {
-          console.error('No se pudo enviar el consentimiento', error);
-          const detalle = error instanceof Error ? error.message : 'No se pudo identificar el error';
-          toast.error(`Las facturas se registraron, pero no se pudo enviar el correo de consentimiento. ${detalle}`);
-        }),
         fetchFacturasDelDia()
           .then(setFacturas)
           .catch((error) => {
@@ -1028,6 +1014,39 @@ export function Registro() {
     );
   };
 
+  const registrarConsentimientosImpresos = async (facturasConfirmadas: FacturaPendiente[]) => {
+    const facturasPorCliente = new Map<string, string[]>();
+
+    for (const factura of facturasConfirmadas) {
+      if (!factura.clienteId || !factura.facturaId) {
+        throw new Error('No se pudo identificar el cliente o la factura para enviar el consentimiento');
+      }
+      const ids = facturasPorCliente.get(factura.clienteId) ?? [];
+      ids.push(factura.facturaId);
+      facturasPorCliente.set(factura.clienteId, ids);
+    }
+
+    const resultados = await Promise.all(
+      Array.from(facturasPorCliente.entries()).map(([clienteIdConfirmado, facturaIds]) =>
+        enviarConsentimientoCliente(clienteIdConfirmado, facturaIds),
+      ),
+    );
+
+    if (resultados.some((result) => result.skipped)) {
+      toast.info('El cliente ya aceptó la política de protección de datos; se asociaron las nuevas facturas');
+    }
+  };
+
+  const enviarConsentimientosLuegoDeImprimir = async (facturasConfirmadas: FacturaPendiente[]) => {
+    try {
+      await registrarConsentimientosImpresos(facturasConfirmadas);
+    } catch (error) {
+      console.error('No se pudo registrar o enviar el consentimiento', error);
+      const detalle = error instanceof Error ? error.message : 'No se pudo identificar el error';
+      toast.error(`Los tickets se imprimieron, pero no se pudo procesar el consentimiento. ${detalle}`);
+    }
+  };
+
   // Función para imprimir tickets
   const imprimirTickets = async () => {
     if (ticketsImpresos) return;
@@ -1052,6 +1071,7 @@ export function Registro() {
       void esperarTrabajoImpresion(job.jobId)
         .then(async () => {
           await marcarFacturasComoImpresas(facturaIds);
+          await enviarConsentimientosLuegoDeImprimir(facturasActuales);
           setTicketsImpresos(true);
           limpiarCliente();
           const actualizadas = await fetchFacturasDelDia();
@@ -1141,6 +1161,7 @@ export function Registro() {
     setConfirmandoPdf(true);
     try {
       await marcarFacturasComoImpresas(facturaIds);
+      await enviarConsentimientosLuegoDeImprimir(facturasActuales);
       sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
       setTicketsImpresos(true);
       setMostrarOpcionPdfAdmin(false);
