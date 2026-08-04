@@ -132,7 +132,9 @@ function formatDate(dateValue: string | null | undefined) {
 }
 
 function getConsentimiento(factura: ReporteriaFactura) {
-  return factura.clientes?.formularios_consentimiento?.[0] ?? null;
+  const consentimiento = factura.clientes?.formularios_consentimiento;
+  if (!consentimiento) return null;
+  return Array.isArray(consentimiento) ? consentimiento[0] ?? null : consentimiento;
 }
 
 function getClienteNombre(factura: ReporteriaFactura) {

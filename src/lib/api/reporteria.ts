@@ -31,7 +31,13 @@ export interface ReporteriaFactura {
     telefono: string | null;
     correo: string | null;
     genero: string | null;
-    formularios_consentimiento?: Array<{
+    formularios_consentimiento?: {
+      acepta_publicidad: boolean;
+      acepta_proteccion_datos: boolean;
+      fecha_aceptacion: string | null;
+      formulario_enviado_at: string | null;
+      correo_enviado_at: string | null;
+    } | Array<{
       acepta_publicidad: boolean;
       acepta_proteccion_datos: boolean;
       fecha_aceptacion: string | null;
