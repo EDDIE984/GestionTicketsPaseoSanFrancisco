@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
@@ -38,7 +38,7 @@ import {
 import { Textarea } from '@/app/components/ui/textarea';
 import { Badge } from '@/app/components/ui/badge';
 import { toast } from 'sonner';
-import { CheckCircle2, X, Printer, PlusCircle, FileStack, LoaderCircle, RotateCcw } from 'lucide-react';
+import { CheckCircle2, X, Printer, PlusCircle, FileStack, LoaderCircle, RotateCcw, FileDown } from 'lucide-react';
 import { useAuth } from '@/app/components/AuthContext';
 import { consultarCedula } from '@/lib/api/cedula';
 import { enviarConsentimientoCliente } from '@/lib/api/consentimientos';
@@ -97,6 +97,12 @@ const TICKET_PAPER_CHARS = 42;
 const FACTURA_MAX_LENGTH = 17;
 const FACTURA_FORMAT_REGEX = /^\d{3}-\d{3}-\d{9}$/;
 const FACTURA_FORMAT_LABEL = '001-001-000000397';
+const REGISTRO_PENDIENTE_KEY = 'gestion_tickets_registro_pendiente';
+
+interface RegistroPendientePersistido {
+  facturaIds: string[];
+  usuarioId: string;
+}
 
 function formatearNumeroFactura(value: string) {
   const digitos = value.replace(/\D/g, '').slice(0, 15);
@@ -140,7 +146,8 @@ interface MetodoPagoDisponible {
 }
 
 export function Registro() {
-  const { user } = useAuth();
+  const { user, loading: cargandoSesion } = useAuth();
+  const revisandoRegistroPendiente = useRef(false);
 
   // Remote data
   const [eventosActivos, setEventosActivos] = useState<EventoActivo[]>([]);
@@ -223,6 +230,9 @@ export function Registro() {
   const [facturasActuales, setFacturasActuales] = useState<FacturaPendiente[]>([]);
   const [ticketsImpresos, setTicketsImpresos] = useState(false);
   const [mostrarConfirmacionReverso, setMostrarConfirmacionReverso] = useState(false);
+  const [mostrarOpcionPdfAdmin, setMostrarOpcionPdfAdmin] = useState(false);
+  const [mostrarConfirmacionPdf, setMostrarConfirmacionPdf] = useState(false);
+  const [confirmandoPdf, setConfirmandoPdf] = useState(false);
   const [motivoReverso, setMotivoReverso] = useState('');
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [saldoAnterior, setSaldoAnterior] = useState<number>(0);
@@ -240,6 +250,50 @@ export function Registro() {
     saldos: Array<{ evento_id: string; evento_nombre: string; saldo: number; updated_at: string }>;
     historial: Array<{ id: string; evento_nombre: string; numero_factura: string; monto_factura: number; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string }>;
   } | null>(null);
+
+  useEffect(() => {
+    if (cargandoSesion || revisandoRegistroPendiente.current) return;
+
+    const registroGuardado = sessionStorage.getItem(REGISTRO_PENDIENTE_KEY);
+    if (!registroGuardado) return;
+
+    let registroPendiente: RegistroPendientePersistido;
+    try {
+      registroPendiente = JSON.parse(registroGuardado) as RegistroPendientePersistido;
+    } catch {
+      sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
+      return;
+    }
+
+    if (
+      !user ||
+      registroPendiente.usuarioId !== user.id ||
+      !Array.isArray(registroPendiente.facturaIds) ||
+      registroPendiente.facturaIds.length === 0
+    ) {
+      return;
+    }
+
+    revisandoRegistroPendiente.current = true;
+    setReversandoRegistro(true);
+    void reversarFacturasRegistro({
+      facturaIds: registroPendiente.facturaIds,
+      usuarioId: user.id,
+      motivo: 'Reverso automático por recarga sin imprimir tickets ni reversar el registro',
+    })
+      .then(async (result) => {
+        sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
+        setFacturas(await fetchFacturasDelDia());
+        toast.info(`Se reversó automáticamente el registro pendiente (${result.facturas_reversadas} factura${result.facturas_reversadas === 1 ? '' : 's'})`);
+      })
+      .catch((error) => {
+        console.error('No se pudo reversar automáticamente el registro pendiente', error);
+        toast.error(error instanceof Error ? error.message : 'No se pudo reversar automáticamente el registro pendiente');
+      })
+      .finally(() => {
+        setReversandoRegistro(false);
+      });
+  }, [cargandoSesion, user]);
   const eventoSeleccionado = useMemo(
     () => eventosActivos.find((evento) => evento.id === eventoId),
     [eventosActivos, eventoId]
@@ -513,7 +567,28 @@ export function Registro() {
     setClienteId(null);
     setSaldoAnterior(0);
     setEventoId('');
+    setLocalId('');
     limpiarFactura();
+  };
+
+  const cambiarCedula = (nuevaCedula: string) => {
+    const hayDatosDelClienteAnterior = Boolean(
+      ultimaCedulaConsultada ||
+      clienteId ||
+      nombre ||
+      apellido ||
+      direccion ||
+      telefono ||
+      correo ||
+      genero
+    );
+    const esOtraCedula = nuevaCedula.trim() !== cedula.trim();
+
+    if (esOtraCedula && hayDatosDelClienteAnterior) {
+      limpiarCliente();
+    }
+
+    setCedula(nuevaCedula);
   };
 
   const separarNombreCompleto = (nombreCompleto?: string) => {
@@ -815,6 +890,12 @@ export function Registro() {
 
       setFacturasActuales(facturasRegistradas);
       setFacturasPendientes([]);
+      sessionStorage.setItem(REGISTRO_PENDIENTE_KEY, JSON.stringify({
+        facturaIds: facturasRegistradas
+          .map((factura) => factura.facturaId)
+          .filter((id): id is string => Boolean(id)),
+        usuarioId: user.id,
+      } satisfies RegistroPendientePersistido));
       setMostrarDialogoTickets(true);
       setTicketsImpresos(false);
 
@@ -961,9 +1042,11 @@ export function Registro() {
     }
 
     setMarcandoImpresion(true);
+    setMostrarOpcionPdfAdmin(false);
     try {
       const tickets = construirTicketsPos();
       const job = await enviarTicketsACola(tickets);
+      sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
       toast.success(`Impresión enviada a la cola (${job.totalTickets} tickets)`);
 
       void esperarTrabajoImpresion(job.jobId)
@@ -973,15 +1056,105 @@ export function Registro() {
           limpiarCliente();
           const actualizadas = await fetchFacturasDelDia();
           setFacturas(actualizadas);
+          setFacturasActuales([]);
+          setFacturasPendientes([]);
+          setMostrarDialogoTickets(false);
+          setMostrarOpcionPdfAdmin(false);
           toast.success(`Tickets impresos correctamente (${job.totalTickets})`);
         })
         .catch((error) => {
+          if (user?.rol === 'Admin') setMostrarOpcionPdfAdmin(true);
           toast.error(error instanceof Error ? error.message : 'No se pudo confirmar la impresión');
         });
     } catch (error) {
+      if (user?.rol === 'Admin') setMostrarOpcionPdfAdmin(true);
       toast.error(error instanceof Error ? error.message : 'No se pudo enviar los tickets a impresión');
     } finally {
       setMarcandoImpresion(false);
+    }
+  };
+
+  const escaparHtml = (value: string) => value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+
+  const imprimirTicketsEnPdf = () => {
+    if (user?.rol !== 'Admin' || !mostrarOpcionPdfAdmin) return;
+
+    const tickets = construirTicketsPos();
+    if (tickets.length === 0) {
+      toast.error('No hay tickets para generar el PDF');
+      return;
+    }
+
+    const ventanaPdf = window.open('', '_blank');
+    if (!ventanaPdf) {
+      toast.error('El navegador bloqueó la ventana de impresión. Habilita las ventanas emergentes e inténtalo nuevamente.');
+      return;
+    }
+    ventanaPdf.opener = null;
+
+    const contenidoTickets = tickets.map((ticket) => {
+      const lineas = construirLineasPreviewTicket(ticket).join('\n');
+      return `<section class="ticket"><pre>${escaparHtml(lineas)}</pre></section>`;
+    }).join('');
+
+    ventanaPdf.document.write(`<!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <title>Tickets - Paseo San Francisco</title>
+          <style>
+            @page { size: 80mm auto; margin: 5mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; background: #fff; color: #000; }
+            .ticket { width: 70mm; margin: 0 auto; padding: 4mm 0; break-after: page; page-break-after: always; }
+            .ticket:last-child { break-after: auto; page-break-after: auto; }
+            pre { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; font: 10pt/1.35 "Courier New", monospace; }
+          </style>
+        </head>
+        <body>${contenidoTickets}</body>
+      </html>`);
+    ventanaPdf.document.close();
+    ventanaPdf.setTimeout(() => {
+      ventanaPdf.focus();
+      ventanaPdf.print();
+      setMostrarConfirmacionPdf(true);
+    }, 150);
+  };
+
+  const confirmarPdfGuardado = async () => {
+    if (user?.rol !== 'Admin') return;
+
+    const facturaIds = facturasActuales
+      .map((factura) => factura.facturaId)
+      .filter((id): id is string => Boolean(id));
+
+    if (facturaIds.length !== facturasActuales.length) {
+      toast.error('No se pudo identificar todas las facturas para confirmar el PDF');
+      return;
+    }
+
+    setConfirmandoPdf(true);
+    try {
+      await marcarFacturasComoImpresas(facturaIds);
+      sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
+      setTicketsImpresos(true);
+      setMostrarOpcionPdfAdmin(false);
+      setMostrarConfirmacionPdf(false);
+      limpiarCliente();
+      setFacturas(await fetchFacturasDelDia());
+      setFacturasActuales([]);
+      setFacturasPendientes([]);
+      setMostrarDialogoTickets(false);
+      toast.success(`PDF confirmado correctamente (${construirTicketsPos().length} tickets)`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo confirmar el PDF');
+    } finally {
+      setConfirmandoPdf(false);
     }
   };
 
@@ -1018,6 +1191,7 @@ export function Registro() {
       setMostrarConfirmacionReverso(false);
       setMotivoReverso('');
       setTicketsImpresos(false);
+      sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
       toast.success(`Registro reversado correctamente (${result.facturas_reversadas} factura${result.facturas_reversadas === 1 ? '' : 's'})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo reversar el registro';
@@ -1123,7 +1297,7 @@ export function Registro() {
                   <Input
                     id="cedula"
                     value={cedula}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCedula(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => cambiarCedula(e.target.value)}
                     onBlur={consultarDatosCedula}
                     placeholder="Número de cédula"
                     disabled={consultandoCedula}
@@ -1750,8 +1924,13 @@ export function Registro() {
       </Dialog>
 
       {/* Diálogo de Tickets */}
-      <Dialog open={mostrarDialogoTickets} onOpenChange={setMostrarDialogoTickets}>
-        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-6xl flex-col gap-0 overflow-hidden p-0">
+      <Dialog open={mostrarDialogoTickets} onOpenChange={(open) => open && setMostrarDialogoTickets(true)}>
+        <DialogContent
+          showCloseButton={false}
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+          className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-6xl flex-col gap-0 overflow-hidden p-0"
+        >
           <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6">
             <DialogTitle className="text-2xl">
               Tickets Generados - Total: {facturasActuales.reduce((acc, f) => acc + f.totalEntregables, 0)}
@@ -1841,9 +2020,6 @@ export function Registro() {
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t bg-white px-6 py-4">
-                <Button variant="outline" onClick={() => setMostrarDialogoTickets(false)} size="lg">
-                  Cerrar
-                </Button>
                 <Button
                   variant="outline"
                   onClick={() => setMostrarConfirmacionReverso(true)}
@@ -1876,11 +2052,42 @@ export function Registro() {
                   )}
                   {ticketsImpresos ? 'Tickets impresos' : marcandoImpresion ? 'Enviando...' : 'Imprimir todos los tickets'}
                 </Button>
+                {user?.rol === 'Admin' && mostrarOpcionPdfAdmin && !ticketsImpresos && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={imprimirTicketsEnPdf}
+                    size="lg"
+                    className="border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                    disabled={marcandoImpresion || reversandoRegistro || facturasActuales.every((f) => f.totalEntregables === 0)}
+                  >
+                    <FileDown className="w-5 h-5 mr-2" />
+                    Imprimir/Guardar PDF
+                  </Button>
+                )}
               </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={mostrarConfirmacionPdf} onOpenChange={(open) => !confirmandoPdf && setMostrarConfirmacionPdf(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar PDF guardado</AlertDialogTitle>
+            <AlertDialogDescription>
+              Confirma únicamente si imprimiste o guardaste correctamente todos los tickets en PDF. Esta acción finalizará el registro y marcará los tickets como impresos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmandoPdf}>Volver a imprimir</AlertDialogCancel>
+            <Button type="button" onClick={confirmarPdfGuardado} disabled={confirmandoPdf}>
+              {confirmandoPdf && <LoaderCircle className="w-4 h-4 mr-2 animate-spin" />}
+              Confirmar PDF guardado
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={mostrarConfirmacionReverso} onOpenChange={setMostrarConfirmacionReverso}>
         <AlertDialogContent>
