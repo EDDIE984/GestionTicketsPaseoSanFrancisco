@@ -19,6 +19,17 @@ export function Consentimiento() {
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
   const [guardado, setGuardado] = useState(false);
+  const [preferenciasGuardadas, setPreferenciasGuardadas] = useState<{
+    aceptaPublicidad: boolean;
+    aceptaProteccionDatos: boolean;
+  } | null>(null);
+
+  const hayCambiosSinGuardar = Boolean(
+    guardado &&
+    preferenciasGuardadas &&
+    (aceptaPublicidad !== preferenciasGuardadas.aceptaPublicidad ||
+      aceptaProteccionDatos !== preferenciasGuardadas.aceptaProteccionDatos)
+  );
 
   useEffect(() => {
     const cargar = async () => {
@@ -35,6 +46,12 @@ export function Consentimiento() {
         setAceptaPublicidad(yaFueGuardado ? Boolean(consentimiento.acepta_publicidad) : false);
         setAceptaProteccionDatos(yaFueGuardado ? Boolean(consentimiento.acepta_proteccion_datos) : true);
         setGuardado(yaFueGuardado);
+        setPreferenciasGuardadas(yaFueGuardado
+          ? {
+              aceptaPublicidad: Boolean(consentimiento.acepta_publicidad),
+              aceptaProteccionDatos: Boolean(consentimiento.acepta_proteccion_datos),
+            }
+          : null);
       } catch (err) {
         const status = err instanceof Error ? err.message : '';
         setError(status === '410' ? 'Este enlace expiró.' : 'No pudimos cargar el formulario.');
@@ -54,6 +71,7 @@ export function Consentimiento() {
     try {
       await guardarConsentimiento(token, aceptaPublicidad, aceptaProteccionDatos);
       setGuardado(true);
+      setPreferenciasGuardadas({ aceptaPublicidad, aceptaProteccionDatos });
     } catch {
       setError('No pudimos guardar tu aceptación. Intenta nuevamente.');
     } finally {
@@ -112,10 +130,16 @@ export function Consentimiento() {
                   </div>
                 </div>
 
-                {guardado && (
+                {guardado && !hayCambiosSinGuardar && (
                   <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-4 text-green-800">
                     <CheckCircle2 className="h-5 w-5" />
-                    Tus preferencias están guardadas. Puedes modificarlas y volver a guardar.
+                    Tus preferencias se guardaron correctamente. No necesitas realizar ninguna otra acción.
+                  </div>
+                )}
+
+                {hayCambiosSinGuardar && (
+                  <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-amber-800">
+                    Tienes cambios sin guardar. Guarda nuevamente para actualizar tus preferencias.
                   </div>
                 )}
 
@@ -173,9 +197,13 @@ export function Consentimiento() {
                 )}
 
                 <div className="flex justify-end border-t border-slate-200 pt-4">
-                  <Button onClick={enviar} disabled={guardando}>
+                  <Button onClick={enviar} disabled={guardando || (guardado && !hayCambiosSinGuardar)}>
                     {guardando && <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />}
-                    {guardado ? 'Actualizar preferencias' : 'Enviar aceptación'}
+                    {guardado
+                      ? hayCambiosSinGuardar
+                        ? 'Guardar cambios'
+                        : 'Preferencias guardadas'
+                      : 'Enviar aceptación'}
                   </Button>
                 </div>
               </>
