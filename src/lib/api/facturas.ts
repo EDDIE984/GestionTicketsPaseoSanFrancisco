@@ -126,6 +126,7 @@ export async function fetchEventosActivos() {
     .select(`
       id, nombre, fecha_inicio, fecha_fin, valor_minimo, valor_maximo, activo,
       evento_categorias(categoria_id),
+      evento_reglas_calculo(id, categoria_id, aplica_todos, acumula_saldo, valor_minimo, valor_maximo, activo, evento_regla_locales(local_id)),
       evento_cupones(cupon_id, cupones(id, nombre, numero))
     `)
     .eq('activo', true)
@@ -143,6 +144,16 @@ export async function fetchEventosActivos() {
     activo: boolean;
     evento_categorias: Array<{
       categoria_id: string;
+    }>;
+    evento_reglas_calculo: Array<{
+      id: string;
+      categoria_id: string;
+      aplica_todos: boolean;
+      acumula_saldo: boolean;
+      evento_regla_locales: Array<{ local_id: string }>;
+      valor_minimo: number;
+      valor_maximo: number;
+      activo: boolean;
     }>;
     evento_cupones: Array<{
       cupon_id: string;

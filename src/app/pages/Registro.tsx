@@ -74,6 +74,12 @@ interface FacturaPendiente {
   eventoNombre: string;
   eventoId: string;
   eventoValorMinimo: number;
+  reglaCalculoId: string | null;
+  categoriaIdAplicada: string;
+  valorMinimoAplicado: number;
+  valorMaximoAplicado: number;
+  reglaCalculoOrigen: 'general' | 'categoria' | 'local';
+  acumulaSaldoAplicado: boolean;
   cedula: string;
   nombre: string;
   apellido: string;
@@ -126,6 +132,16 @@ interface EventoActivo {
   activo: boolean;
   evento_categorias: Array<{
     categoria_id: string;
+  }>;
+  evento_reglas_calculo: Array<{
+    id: string;
+    categoria_id: string;
+    aplica_todos: boolean;
+    acumula_saldo: boolean;
+    evento_regla_locales: Array<{ local_id: string }>;
+    valor_minimo: number;
+    valor_maximo: number;
+    activo: boolean;
   }>;
   evento_cupones: Array<{
     cupon_id: string;
@@ -299,14 +315,16 @@ export function Registro() {
     () => eventosActivos.find((evento) => evento.id === eventoId),
     [eventosActivos, eventoId]
   );
-  const categoriasParticipantesEvento = useMemo(
-    () => new Set((eventoSeleccionado?.evento_categorias ?? []).map((categoria) => categoria.categoria_id)),
-    [eventoSeleccionado]
-  );
   const localesFiltradosPorEvento = useMemo(() => {
     if (!eventoId || !eventoSeleccionado) return localesDisponibles;
-    return localesDisponibles.filter((local) => categoriasParticipantesEvento.has(local.categoria_id));
-  }, [categoriasParticipantesEvento, eventoId, eventoSeleccionado, localesDisponibles]);
+    const categoriasGenerales = new Set(eventoSeleccionado.evento_categorias.map((item) => item.categoria_id));
+    const reglasActivas = eventoSeleccionado.evento_reglas_calculo.filter((regla) => regla.activo);
+    const categoriasConRegla = new Set(reglasActivas.filter((regla) => regla.aplica_todos).map((regla) => regla.categoria_id));
+    const localesConRegla = new Set(reglasActivas.flatMap((regla) => regla.evento_regla_locales.map((item) => item.local_id)));
+    return localesDisponibles.filter((local) =>
+      categoriasGenerales.has(local.categoria_id) || categoriasConRegla.has(local.categoria_id) || localesConRegla.has(local.id),
+    );
+  }, [eventoId, eventoSeleccionado, localesDisponibles]);
 
   useEffect(() => {
     if (!localId) return;
@@ -332,6 +350,23 @@ export function Registro() {
     return metodosPago.reduce((sum, m) => sum + m.monto, 0);
   };
 
+  const resolverParametrosCalculo = (evento: EventoActivo | undefined, localSeleccionadoId: string) => {
+    const local = localesDisponibles.find((item) => item.id === localSeleccionadoId);
+    const reglas = (evento?.evento_reglas_calculo ?? []).filter((regla) => regla.activo);
+    const reglaLocal = reglas.find((regla) => !regla.aplica_todos && regla.evento_regla_locales.some((item) => item.local_id === localSeleccionadoId));
+    const reglaCategoria = reglas.find((regla) => regla.aplica_todos && regla.categoria_id === local?.categoria_id);
+    const regla = reglaLocal ?? reglaCategoria ?? null;
+
+    return {
+      regla,
+      categoriaId: local?.categoria_id ?? '',
+      valorMinimo: regla?.valor_minimo ?? evento?.valor_minimo ?? 0,
+      valorMaximo: regla?.valor_maximo ?? evento?.valor_maximo ?? 0,
+      acumulaSaldo: regla?.acumula_saldo ?? true,
+    };
+  };
+  const parametrosCalculoActual = resolverParametrosCalculo(eventoSeleccionado, localId);
+
   const totalMetodosCoincideConFactura = () => {
     const totalFactura = parseFloat(montoTotal);
     if (!Number.isFinite(totalFactura) || totalFactura <= 0) return false;
@@ -348,7 +383,8 @@ export function Registro() {
     evento: EventoActivo | undefined,
     montoFactura: number,
     saldoActual: number,
-    cuponNumero = 1
+    cuponNumero = 1,
+    acumulaSaldo = true,
   ) => {
     const valorMinimo = evento?.valor_minimo ?? 0;
     const valorMaximo = evento?.valor_maximo ?? 0;
@@ -367,7 +403,7 @@ export function Registro() {
     const maxTicketsFactura = valorMaximo > 0
       ? Math.floor(valorMaximo / valorMinimo)
       : Number.POSITIVE_INFINITY;
-    const montoDisponible = montoPermitido + saldoActual;
+    const montoDisponible = montoPermitido + (acumulaSaldo ? saldoActual : 0);
     const ticketsBaseSinTope = Math.floor(montoDisponible / valorMinimo);
     const ticketsSinTope = ticketsBaseSinTope * cuponNumero;
     const tickets = Math.min(ticketsSinTope, maxTicketsFactura);
@@ -375,7 +411,9 @@ export function Registro() {
       ? Math.ceil(tickets / cuponNumero)
       : tickets;
     const montoConsumido = ticketsBaseConsumidos * valorMinimo;
-    const saldoNuevo = parseFloat(Math.max(montoDisponible - montoConsumido, 0).toFixed(2));
+    const saldoNuevo = acumulaSaldo
+      ? parseFloat(Math.max(montoDisponible - montoConsumido, 0).toFixed(2))
+      : parseFloat(saldoActual.toFixed(2));
 
     return {
       tickets,
@@ -398,7 +436,15 @@ export function Registro() {
     const evento = eventosActivos.find((e) => e.id === eventoId);
     const montoFactura = parseFloat(montoTotal);
     if (!evento || !Number.isFinite(montoFactura) || montoFactura <= 0) return null;
-    return calcularResultadoFactura(evento, montoFactura, saldoAnterior).saldoNuevo;
+    const parametros = resolverParametrosCalculo(evento, localId);
+    const resultado = calcularResultadoFactura(
+      { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo },
+      montoFactura,
+      saldoAnterior,
+      1,
+      parametros.acumulaSaldo,
+    );
+    return parametros.acumulaSaldo ? resultado.saldoNuevo : 0;
   };
 
   useEffect(() => {
@@ -516,11 +562,18 @@ export function Registro() {
       },
     ];
     const cuponNumeroFactura = metodosPago[0]?.cuponNumero ?? cuponNumero;
-    const resultadoFactura = calcularResultadoFactura(evento, totalActual + monto, saldoAnterior, cuponNumeroFactura);
+    const parametros = resolverParametrosCalculo(evento, localId);
+    const resultadoFactura = calcularResultadoFactura(
+      evento ? { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo } : undefined,
+      totalActual + monto,
+      saldoAnterior,
+      cuponNumeroFactura,
+      parametros.acumulaSaldo,
+    );
 
     if (resultadoFactura.excedenteDescartado > 0) {
       toast.warning(
-        `Esta factura supera el máximo de la campaña. ` +
+        `Esta factura supera el máximo ${parametros.regla ? 'de la excepción aplicada' : 'de la campaña'}. ` +
         `Se generarán ${resultadoFactura.tickets} ticket(s) y $${resultadoFactura.excedenteDescartado.toFixed(2)} no acumulará saldo.`,
         { duration: 6000 }
       );
@@ -742,20 +795,26 @@ export function Registro() {
       return;
     }
     const eventoNombre = eventoSeleccionado?.nombre || '';
-    const eventoValorMinimo = eventoSeleccionado?.valor_minimo || 0;
+    const parametrosCalculo = resolverParametrosCalculo(eventoSeleccionado, localId);
+    const eventoValorMinimo = parametrosCalculo.valorMinimo;
     const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
     const cuponNumeroFactura = metodosPago[0]?.cuponNumero ?? 1;
     const resultadoFactura = calcularResultadoFactura(
-      eventoSeleccionado,
+      eventoSeleccionado ? {
+        ...eventoSeleccionado,
+        valor_minimo: parametrosCalculo.valorMinimo,
+        valor_maximo: parametrosCalculo.valorMaximo,
+      } : undefined,
       montoTotalNum,
       saldoAnterior,
-      cuponNumeroFactura
+      cuponNumeroFactura,
+      parametrosCalculo.acumulaSaldo,
     );
     const metodosPagoCalculados = distribuirEntregablesEnMetodos(metodosPago, resultadoFactura.tickets);
 
     if (resultadoFactura.excedenteDescartado > 0) {
       toast.warning(
-        `La factura ${numeroFactura.trim()} supera el máximo de la campaña. ` +
+        `La factura ${numeroFactura.trim()} supera el máximo ${parametrosCalculo.regla ? 'de la excepción aplicada' : 'de la campaña'}. ` +
         `$${resultadoFactura.excedenteDescartado.toFixed(2)} no se acumulará como saldo.`,
         { duration: 6000 }
       );
@@ -768,6 +827,12 @@ export function Registro() {
       localNombre,
       eventoId,
       eventoValorMinimo,
+      reglaCalculoId: parametrosCalculo.regla?.id ?? null,
+      categoriaIdAplicada: parametrosCalculo.categoriaId,
+      valorMinimoAplicado: parametrosCalculo.valorMinimo,
+      valorMaximoAplicado: parametrosCalculo.valorMaximo,
+      reglaCalculoOrigen: parametrosCalculo.regla && !parametrosCalculo.regla.aplica_todos ? 'local' : parametrosCalculo.regla ? 'categoria' : 'general',
+      acumulaSaldoAplicado: parametrosCalculo.acumulaSaldo,
       cedula,
       nombre,
       apellido,
@@ -852,6 +917,12 @@ export function Registro() {
             monto_total: fp.montoTotal,
             fecha_emision: fp.fechaEmision,
             total_entregables: fp.totalEntregables,
+            regla_calculo_id: fp.reglaCalculoId,
+            categoria_id_aplicada: fp.categoriaIdAplicada || null,
+            valor_minimo_aplicado: fp.valorMinimoAplicado,
+            valor_maximo_aplicado: fp.valorMaximoAplicado,
+            regla_calculo_origen: fp.reglaCalculoOrigen,
+            acumula_saldo_aplicado: fp.acumulaSaldoAplicado,
           },
           fp.metodosPago.map((m) => ({
             metodo_pago_id: m.id,
@@ -1462,6 +1533,16 @@ export function Registro() {
                     />
                   </div>
                 </div>
+
+                {localId && parametrosCalculoActual.regla && (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-semibold">Parámetros especiales aplicados automáticamente</p>
+                    <p className="mt-1 text-xs text-amber-800">
+                      Valor mínimo: ${parametrosCalculoActual.valorMinimo.toFixed(2)} · Valor máximo: ${parametrosCalculoActual.valorMaximo.toFixed(2)} · Prioridad: {!parametrosCalculoActual.regla.aplica_todos ? 'local' : 'categoría'}
+                    </p>
+                    {!parametrosCalculoActual.acumulaSaldo && <p className="mt-1 text-xs font-semibold text-amber-900">Esta factura no utiliza ni genera saldo acumulado.</p>}
+                  </div>
+                )}
               </div>
 
               <div className="border-t pt-6">
@@ -1989,7 +2070,7 @@ export function Registro() {
                         </div>
                       </div>
 
-                      {(facturaActual.saldoAnterior > 0 || facturaActual.saldoNuevo > 0) && (
+                      {facturaActual.acumulaSaldoAplicado && (facturaActual.saldoAnterior > 0 || facturaActual.saldoNuevo > 0) && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm">
                           <h4 className="font-semibold text-amber-800 mb-2">Saldo Acumulado</h4>
                           <div className="grid grid-cols-3 gap-4 text-center">
@@ -2008,6 +2089,11 @@ export function Registro() {
                               <p className="font-bold text-amber-900 tabular-nums">${facturaActual.saldoNuevo.toFixed(2)}</p>
                             </div>
                           </div>
+                        </div>
+                      )}
+                      {!facturaActual.acumulaSaldoAplicado && (
+                        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                          Esta factura no utiliza ni genera saldo acumulado. El saldo anterior del cliente se conserva intacto.
                         </div>
                       )}
 

@@ -69,6 +69,18 @@ export interface EventoCampana {
   categoria_ids: string[];
   cupon_ids: string[];
   entregable_ids: string[];
+  reglas_calculo: EventoReglaCalculo[];
+}
+
+export interface EventoReglaCalculo {
+  id?: string;
+  categoria_id: string;
+  aplica_todos: boolean;
+  local_ids: string[];
+  acumula_saldo: boolean;
+  valor_minimo: number;
+  valor_maximo: number;
+  activo: boolean;
 }
 
 export interface ParametrizacionCorreo {
@@ -105,6 +117,12 @@ export interface Factura {
   tickets_impresos: boolean;
   tickets_impresos_at: string | null;
   fecha_registro: string;
+  regla_calculo_id?: string | null;
+  categoria_id_aplicada?: string | null;
+  valor_minimo_aplicado?: number | null;
+  valor_maximo_aplicado?: number | null;
+  regla_calculo_origen?: 'general' | 'categoria' | 'local' | null;
+  acumula_saldo_aplicado?: boolean | null;
 }
 
 export interface FacturaMetodoPago {

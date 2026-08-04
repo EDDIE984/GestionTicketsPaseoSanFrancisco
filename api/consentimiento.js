@@ -29,7 +29,7 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'POST') {
-    const { token, aceptaPublicidad, aceptaProteccionDatos } = request.body ?? {};
+    const { token, aceptaPublicidad } = request.body ?? {};
     if (!token) {
       return response.status(400).json({ message: 'Token inválido' });
     }
@@ -51,7 +51,7 @@ export default async function handler(request, response) {
       .from('formularios_consentimiento')
       .update({
         acepta_publicidad: aceptaPublicidad === true,
-        acepta_proteccion_datos: aceptaProteccionDatos === true,
+        acepta_proteccion_datos: true,
         fecha_aceptacion: existing.fecha_aceptacion ?? now,
         formulario_enviado_at: now,
         ip: request.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? request.socket?.remoteAddress ?? null,

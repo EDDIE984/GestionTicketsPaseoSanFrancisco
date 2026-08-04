@@ -23,6 +23,12 @@ export interface ReporteriaFactura {
   tickets_impresos: boolean;
   tickets_impresos_at: string | null;
   fecha_registro: string;
+  regla_calculo_id: string | null;
+  categoria_id_aplicada: string | null;
+  valor_minimo_aplicado: number | null;
+  valor_maximo_aplicado: number | null;
+  regla_calculo_origen: 'general' | 'categoria' | 'local' | null;
+  acumula_saldo_aplicado: boolean | null;
   clientes: {
     cedula: string;
     nombre: string;

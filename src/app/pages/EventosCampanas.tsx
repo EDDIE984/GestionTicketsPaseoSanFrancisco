@@ -5,8 +5,10 @@ import { Label } from '@/app/components/ui/label';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import { Button } from '@/app/components/ui/button';
 import { Switch } from '@/app/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { toast } from 'sonner';
-import type { EventoCampana, Categoria, Cupon, Entregable } from '@/lib/types';
+import { Plus, Trash2 } from 'lucide-react';
+import type { EventoCampana, EventoReglaCalculo, Categoria, Cupon, Entregable, Local } from '@/lib/types';
 import {
   fetchEventos,
   createEvento,
@@ -16,6 +18,7 @@ import {
 import { fetchCategorias } from '@/lib/api/categorias';
 import { fetchCupones } from '@/lib/api/cupones';
 import { fetchEntregables } from '@/lib/api/entregables';
+import { fetchLocales } from '@/lib/api/locales';
 
 const toDateTimeInputValue = (value?: string) => {
   if (!value) return '';
@@ -72,8 +75,129 @@ const validarEvento = (form: Partial<EventoCampana>) => {
   if ((form.valor_maximo ?? 0) > 0 && (form.valor_minimo ?? 0) > (form.valor_maximo ?? 0)) {
     return 'El valor mínimo no puede ser mayor que el valor máximo';
   }
+  const reglas = form.reglas_calculo ?? [];
+  for (const regla of reglas) {
+    if (!regla.categoria_id) return 'Selecciona una categoría en cada excepción';
+    if (regla.valor_minimo <= 0) return 'El valor mínimo de cada excepción debe ser mayor a 0';
+    if (regla.valor_maximo < 0 || (regla.valor_maximo > 0 && regla.valor_minimo > regla.valor_maximo)) {
+      return 'Revisa los valores mínimo y máximo de las excepciones';
+    }
+    if (!regla.aplica_todos && regla.local_ids.length === 0) return 'Selecciona al menos un local en cada excepción de locales específicos';
+  }
+  const categoriasTodos = reglas.filter((regla) => regla.aplica_todos).map((regla) => regla.categoria_id);
+  if (new Set(categoriasTodos).size !== categoriasTodos.length) return 'No puede haber dos excepciones para toda la misma categoría';
+  const localesReglas = reglas.flatMap((regla) => regla.local_ids);
+  if (new Set(localesReglas).size !== localesReglas.length) return 'Un local no puede pertenecer a más de una excepción de la campaña';
   return null;
 };
+
+function ReglasCalculoEditor({
+  value,
+  categorias,
+  locales,
+  onChange,
+}: {
+  value: EventoReglaCalculo[];
+  categorias: Categoria[];
+  locales: Local[];
+  onChange: (reglas: EventoReglaCalculo[]) => void;
+}) {
+  const addRegla = () => onChange([...value, {
+    categoria_id: '',
+    aplica_todos: true,
+    local_ids: [],
+    acumula_saldo: false,
+    valor_minimo: 0,
+    valor_maximo: 0,
+    activo: true,
+  }]);
+  const updateRegla = (index: number, patch: Partial<EventoReglaCalculo>) =>
+    onChange(value.map((regla, i) => (i === index ? { ...regla, ...patch } : regla)));
+
+  return (
+    <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Label className="text-base font-semibold text-slate-900">Excepciones de cálculo</Label>
+          <p className="mt-1 text-xs text-slate-600">Usan el mismo cálculo de la campaña con valores distintos. Una regla de local tiene prioridad sobre la regla de categoría.</p>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={addRegla}>
+          <Plus className="mr-1 h-4 w-4" /> Agregar
+        </Button>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        {value.length === 0 && <p className="rounded-md border border-dashed border-amber-300 bg-white/70 p-4 text-center text-sm text-slate-500">La campaña utilizará únicamente sus parámetros generales.</p>}
+        {value.map((regla, index) => {
+          const localesCategoria = locales.filter((local) => local.activo && local.categoria_id === regla.categoria_id);
+          return (
+            <div key={regla.id ?? index} className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-800">Excepción {index + 1}</span>
+                <Button type="button" size="icon" variant="ghost" onClick={() => onChange(value.filter((_, i) => i !== index))} aria-label={`Eliminar excepción ${index + 1}`}>
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                </Button>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label>Categoría</Label>
+                  <Select value={regla.categoria_id} onValueChange={(categoria_id) => updateRegla(index, { categoria_id, local_ids: [] })}>
+                    <SelectTrigger><SelectValue placeholder="Selecciona categoría" /></SelectTrigger>
+                    <SelectContent>{categorias.filter((c) => c.activo).map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Aplicar a</Label>
+                  <Select value={regla.aplica_todos ? 'todos' : 'especificos'} disabled={!regla.categoria_id} onValueChange={(value) => updateRegla(index, { aplica_todos: value === 'todos', local_ids: [] })}>
+                    <SelectTrigger><SelectValue placeholder="Selecciona alcance" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos los locales de la categoría</SelectItem>
+                      <SelectItem value="especificos">Locales específicos</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {!regla.aplica_todos && regla.categoria_id && (
+                  <div className="sm:col-span-2">
+                    <div className="mb-2 flex items-center justify-between">
+                      <Label>Locales</Label>
+                      <span className="text-xs text-slate-500">{regla.local_ids.length} seleccionado{regla.local_ids.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div className="grid max-h-44 gap-2 overflow-y-auto rounded-md border border-slate-200 p-2 sm:grid-cols-2">
+                      {localesCategoria.map((local) => (
+                        <label key={local.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-slate-50">
+                          <Checkbox
+                            checked={regla.local_ids.includes(local.id)}
+                            onCheckedChange={(checked) => updateRegla(index, {
+                              local_ids: checked
+                                ? [...regla.local_ids, local.id]
+                                : regla.local_ids.filter((id) => id !== local.id),
+                            })}
+                          />
+                          <span>{local.nombre}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <Label>Valor mínimo especial</Label>
+                  <Input type="number" min="0.01" step="0.01" value={regla.valor_minimo || ''} onChange={(e) => updateRegla(index, { valor_minimo: toNumberValue(e.target.value) })} placeholder="0.00" />
+                </div>
+                <div>
+                  <Label>Valor máximo especial</Label>
+                  <Input type="number" min="0" step="0.01" value={regla.valor_maximo || ''} onChange={(e) => updateRegla(index, { valor_maximo: toNumberValue(e.target.value) })} placeholder="0.00" />
+                </div>
+                <label className="flex items-center gap-2 text-sm"><Switch checked={regla.activo} onCheckedChange={(activo) => updateRegla(index, { activo })} /> Regla activa</label>
+                <label className="flex items-center gap-2 text-sm"><Switch checked={regla.acumula_saldo} onCheckedChange={(acumula_saldo) => updateRegla(index, { acumula_saldo })} /> Acumula saldo</label>
+                {!regla.acumula_saldo && <p className="sm:col-span-2 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-600">La factura no consumirá saldo anterior ni generará un nuevo saldo. Cualquier saldo existente del cliente se conservará intacto.</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 const getErrorMessage = (error: unknown) => {
   if (error && typeof error === 'object') {
@@ -91,12 +215,14 @@ export function EventosCampanas() {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [cupones, setCupones] = useState<Cupon[]>([]);
   const [entregables, setEntregables] = useState<Entregable[]>([]);
+  const [locales, setLocales] = useState<Local[]>([]);
 
   useEffect(() => {
     fetchEventos().then(setEventos).catch(() => toast.error('Error al cargar eventos'));
     fetchCategorias().then(setCategorias).catch(() => {});
     fetchCupones().then(setCupones).catch(() => {});
     fetchEntregables().then(setEntregables).catch(() => {});
+    fetchLocales().then(setLocales).catch(() => {});
   }, []);
 
   const handleAdd = async (form: Omit<EventoCampana, 'id' | 'created_at'>) => {
@@ -109,6 +235,7 @@ export function EventosCampanas() {
       categoria_ids: form.categoria_ids ?? activeCategoriaIds,
       cupon_ids: form.cupon_ids ?? [],
       entregable_ids: form.entregable_ids ?? [],
+      reglas_calculo: form.reglas_calculo ?? [],
     };
     const errorValidacion = validarEvento(normalizedForm);
     if (errorValidacion) {
@@ -127,6 +254,7 @@ export function EventosCampanas() {
         categoria_ids: normalizedForm.categoria_ids,
         cupon_ids: normalizedForm.cupon_ids,
         entregable_ids: normalizedForm.entregable_ids,
+        reglas_calculo: normalizedForm.reglas_calculo,
       });
       setEventos((prev) => [created, ...prev]);
     } catch (error) {
@@ -171,6 +299,7 @@ export function EventosCampanas() {
     const [localCategorias, setLocalCategorias] = React.useState<string[]>(item?.categoria_ids ?? []);
     const [localCupones, setLocalCupones] = React.useState<string[]>(item?.cupon_ids ?? []);
     const [localEntregables, setLocalEntregables] = React.useState<string[]>(item?.entregable_ids ?? []);
+    const [localReglas, setLocalReglas] = React.useState<EventoReglaCalculo[]>(item?.reglas_calculo ?? []);
     const categoriasActivas = categorias.filter((c) => c.activo);
     const categoriaIdsActivas = categoriasActivas.map((c) => c.id);
     const categoriasExcluidas = categoriaIdsActivas.filter((id) => !localCategorias.includes(id));
@@ -183,6 +312,8 @@ export function EventosCampanas() {
       onChange('categoria_ids', categoriasParticipantes);
       setLocalCupones(item?.cupon_ids ?? []);
       setLocalEntregables(item?.entregable_ids ?? []);
+      setLocalReglas(item?.reglas_calculo ?? []);
+      onChange('reglas_calculo', item?.reglas_calculo ?? []);
     }, [item?.id, categorias.length]);
 
     React.useEffect(() => {
@@ -349,6 +480,16 @@ export function EventosCampanas() {
               ))}
             </div>
           </div>
+
+          <ReglasCalculoEditor
+            value={localReglas}
+            categorias={categorias}
+            locales={locales}
+            onChange={(reglas) => {
+              setLocalReglas(reglas);
+              onChange('reglas_calculo', reglas);
+            }}
+          />
         </div>
       </form>
     );
@@ -391,6 +532,11 @@ export function EventosCampanas() {
           key: 'valor_maximo',
           label: 'Valor Máximo',
           render: (item) => `$${item.valor_maximo.toFixed(2)}`,
+        },
+        {
+          key: 'reglas_calculo',
+          label: 'Excepciones',
+          render: (item) => String(item.reglas_calculo.length),
         },
       ]}
       onAdd={handleAdd as any}

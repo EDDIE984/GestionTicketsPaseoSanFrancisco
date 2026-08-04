@@ -14,7 +14,7 @@ export function Consentimiento() {
   const { token } = useParams();
   const [data, setData] = useState<ConsentimientoPublico | null>(null);
   const [aceptaPublicidad, setAceptaPublicidad] = useState(false);
-  const [aceptaProteccionDatos, setAceptaProteccionDatos] = useState(true);
+  const aceptaProteccionDatos = true;
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
@@ -27,8 +27,7 @@ export function Consentimiento() {
   const hayCambiosSinGuardar = Boolean(
     guardado &&
     preferenciasGuardadas &&
-    (aceptaPublicidad !== preferenciasGuardadas.aceptaPublicidad ||
-      aceptaProteccionDatos !== preferenciasGuardadas.aceptaProteccionDatos)
+    aceptaPublicidad !== preferenciasGuardadas.aceptaPublicidad
   );
 
   useEffect(() => {
@@ -44,12 +43,11 @@ export function Consentimiento() {
         const yaFueGuardado = Boolean(consentimiento.fecha_aceptacion);
         setData(consentimiento);
         setAceptaPublicidad(yaFueGuardado ? Boolean(consentimiento.acepta_publicidad) : false);
-        setAceptaProteccionDatos(yaFueGuardado ? Boolean(consentimiento.acepta_proteccion_datos) : true);
         setGuardado(yaFueGuardado);
         setPreferenciasGuardadas(yaFueGuardado
           ? {
               aceptaPublicidad: Boolean(consentimiento.acepta_publicidad),
-              aceptaProteccionDatos: Boolean(consentimiento.acepta_proteccion_datos),
+              aceptaProteccionDatos: true,
             }
           : null);
       } catch (err) {
@@ -159,13 +157,15 @@ export function Consentimiento() {
                   <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
                     <Checkbox
                       id="proteccionDatos"
-                      checked={aceptaProteccionDatos}
-                      onCheckedChange={(checked) => setAceptaProteccionDatos(Boolean(checked))}
+                      checked
+                      disabled
+                      aria-readonly="true"
                     />
                     <div className="space-y-3">
-                      <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
+                      <Label htmlFor="proteccionDatos" className="cursor-default leading-relaxed text-slate-800">
                         He leído y acepto la política de protección de datos
                       </Label>
+                      <p className="text-xs text-slate-500">Esta aceptación es obligatoria para completar el registro y no puede modificarse.</p>
                       <div className="flex flex-wrap gap-3">
                         <a
                           href={POLITICA_URL}

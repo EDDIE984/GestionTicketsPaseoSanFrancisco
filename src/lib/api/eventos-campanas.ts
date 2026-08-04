@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { EventoCampana } from '@/lib/types';
+import type { EventoCampana, EventoReglaCalculo } from '@/lib/types';
 
 type RawEvento = {
   id: string;
@@ -13,6 +13,9 @@ type RawEvento = {
   evento_categorias: { categoria_id: string }[];
   evento_cupones: { cupon_id: string }[];
   evento_entregables: { entregable_id: string }[];
+  evento_reglas_calculo: Array<Omit<EventoReglaCalculo, 'local_ids'> & {
+    evento_regla_locales: Array<{ local_id: string }>;
+  }>;
 };
 
 function mapRawEvento(raw: RawEvento): EventoCampana {
@@ -28,6 +31,10 @@ function mapRawEvento(raw: RawEvento): EventoCampana {
     categoria_ids: raw.evento_categorias.map((r) => r.categoria_id),
     cupon_ids: raw.evento_cupones.map((r) => r.cupon_id),
     entregable_ids: raw.evento_entregables.map((r) => r.entregable_id),
+    reglas_calculo: (raw.evento_reglas_calculo ?? []).map((regla) => ({
+      ...regla,
+      local_ids: regla.evento_regla_locales?.map((item) => item.local_id) ?? [],
+    })),
   };
 }
 
@@ -38,7 +45,8 @@ export async function fetchEventos(): Promise<EventoCampana[]> {
       *,
       evento_categorias(categoria_id),
       evento_cupones(cupon_id),
-      evento_entregables(entregable_id)
+      evento_entregables(entregable_id),
+      evento_reglas_calculo(id, categoria_id, aplica_todos, acumula_saldo, valor_minimo, valor_maximo, activo, evento_regla_locales(local_id))
     `)
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -55,8 +63,9 @@ export async function createEvento(payload: {
   categoria_ids: string[];
   cupon_ids: string[];
   entregable_ids: string[];
+  reglas_calculo: EventoReglaCalculo[];
 }): Promise<EventoCampana> {
-  const { categoria_ids, cupon_ids, entregable_ids, ...eventoData } = payload;
+  const { categoria_ids, cupon_ids, entregable_ids, reglas_calculo, ...eventoData } = payload;
 
   const { data: evento, error } = await supabase
     .from('eventos_campanas')
@@ -66,12 +75,14 @@ export async function createEvento(payload: {
   if (error) throw error;
 
   await insertPivots(evento.id, categoria_ids, cupon_ids, entregable_ids);
+  await replaceReglas(evento.id, reglas_calculo);
 
   return {
     ...evento,
     categoria_ids,
     cupon_ids,
     entregable_ids,
+    reglas_calculo,
   };
 }
 
@@ -87,9 +98,10 @@ export async function updateEvento(
     categoria_ids?: string[];
     cupon_ids?: string[];
     entregable_ids?: string[];
+    reglas_calculo?: EventoReglaCalculo[];
   }
 ): Promise<EventoCampana> {
-  const { categoria_ids, cupon_ids, entregable_ids, ...eventoData } = payload;
+  const { categoria_ids, cupon_ids, entregable_ids, reglas_calculo, ...eventoData } = payload;
 
   if (Object.keys(eventoData).length > 0) {
     const { error } = await supabase
@@ -141,6 +153,10 @@ export async function updateEvento(
     }
   }
 
+  if (reglas_calculo !== undefined) {
+    await replaceReglas(id, reglas_calculo);
+  }
+
   return fetchEventoById(id);
 }
 
@@ -157,12 +173,46 @@ async function fetchEventoById(id: string): Promise<EventoCampana> {
       *,
       evento_categorias(categoria_id),
       evento_cupones(cupon_id),
-      evento_entregables(entregable_id)
+      evento_entregables(entregable_id),
+      evento_reglas_calculo(id, categoria_id, aplica_todos, acumula_saldo, valor_minimo, valor_maximo, activo, evento_regla_locales(local_id))
     `)
     .eq('id', id)
     .single();
   if (error) throw error;
   return mapRawEvento(data as RawEvento);
+}
+
+async function replaceReglas(eventoId: string, reglas: EventoReglaCalculo[]): Promise<void> {
+  const { error: deleteError } = await supabase
+    .from('evento_reglas_calculo')
+    .delete()
+    .eq('evento_id', eventoId);
+  if (deleteError) throw deleteError;
+
+  if (reglas.length === 0) return;
+  for (const regla of reglas) {
+    const { data: creada, error: insertError } = await supabase
+      .from('evento_reglas_calculo')
+      .insert({
+        evento_id: eventoId,
+        categoria_id: regla.categoria_id,
+        aplica_todos: regla.aplica_todos,
+        acumula_saldo: regla.acumula_saldo,
+        valor_minimo: regla.valor_minimo,
+        valor_maximo: regla.valor_maximo,
+        activo: regla.activo,
+      })
+      .select('id')
+      .single();
+    if (insertError) throw insertError;
+
+    if (!regla.aplica_todos && regla.local_ids.length > 0) {
+      const { error: localesError } = await supabase
+        .from('evento_regla_locales')
+        .insert(regla.local_ids.map((localId) => ({ regla_id: creada.id, local_id: localId })));
+      if (localesError) throw localesError;
+    }
+  }
 }
 
 
