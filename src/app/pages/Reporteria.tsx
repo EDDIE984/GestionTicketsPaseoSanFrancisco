@@ -37,6 +37,7 @@ import {
   Calendar,
   CheckCircle2,
   Download,
+  DollarSign,
   FileSpreadsheet,
   Info,
   Loader2,
@@ -572,7 +573,7 @@ export function Reporteria() {
             </TabsList>
 
             <TabsContent value="dashboard" className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <Card className="border-teal-200 bg-teal-50">
                   <CardHeader className="pb-2">
                     <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
@@ -618,6 +619,18 @@ export function Reporteria() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-semibold text-slate-950">{formatMiles(kpis.canjeTotal)}</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-emerald-200 bg-emerald-50">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <DollarSign className="h-4 w-4 text-emerald-700" />
+                      Valor total canje
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold text-emerald-800">{formatMoney(kpis.montoTotal)}</div>
                   </CardContent>
                 </Card>
 
