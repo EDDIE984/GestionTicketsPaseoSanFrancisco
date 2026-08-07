@@ -407,18 +407,13 @@ export function Registro() {
         tickets: 0,
         saldoNuevo: parseFloat(saldoActual.toFixed(2)),
         excedenteDescartado: 0,
-        maxTicketsFactura: 0,
         metodos: metodos.map((metodo) => ({ ...metodo, entregablesCalculados: 0 })),
       };
     }
 
     const montoPermitido = valorMaximo > 0 ? Math.min(montoFactura, valorMaximo) : montoFactura;
     const excedenteDescartado = valorMaximo > 0 ? Math.max(montoFactura - valorMaximo, 0) : 0;
-    const maxTicketsFactura = valorMaximo > 0
-      ? Math.floor(valorMaximo / valorMinimo)
-      : Number.POSITIVE_INFINITY;
     let montoPermitidoRestante = montoPermitido;
-    let ticketsDisponibles = maxTicketsFactura;
     let tickets = 0;
     let saldoNuevo = acumulaSaldo ? 0 : saldoActual;
 
@@ -429,8 +424,7 @@ export function Registro() {
       const montoDisponible = montoAplicable + saldoAplicable;
       const multiplicador = Math.max(metodo.cuponNumero ?? 1, 1);
       const ticketsBase = Math.floor(montoDisponible / valorMinimo);
-      const ticketsMetodo = Math.min(ticketsBase * multiplicador, ticketsDisponibles);
-      ticketsDisponibles = Math.max(ticketsDisponibles - ticketsMetodo, 0);
+      const ticketsMetodo = ticketsBase * multiplicador;
       tickets += ticketsMetodo;
 
       if (acumulaSaldo) {
@@ -445,7 +439,6 @@ export function Registro() {
       tickets,
       saldoNuevo: parseFloat(saldoNuevo.toFixed(2)),
       excedenteDescartado: parseFloat(excedenteDescartado.toFixed(2)),
-      maxTicketsFactura: Number.isFinite(maxTicketsFactura) ? maxTicketsFactura : 0,
       metodos: metodosCalculados,
     };
   };
