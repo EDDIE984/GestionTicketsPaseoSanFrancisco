@@ -145,6 +145,7 @@ interface EventoActivo {
   }>;
   evento_cupones: Array<{
     cupon_id: string;
+    metodo_pago_id: string | null;
     cupones: { id: string; nombre: string; numero: number };
   }>;
 }
@@ -240,7 +241,6 @@ export function Registro() {
   const [metodosPago, setMetodosPago] = useState<MetodoPagoLocal[]>([]);
   const [metodoSeleccionado, setMetodoSeleccionado] = useState('');
   const [montoMetodo, setMontoMetodo] = useState('');
-  const [cuponSeleccionado, setCuponSeleccionado] = useState('');
   // Facturas pendientes por registrar (en memoria temporal)
   const [facturasPendientes, setFacturasPendientes] = useState<FacturaPendiente[]>([]);
   const [mostrarDialogoTickets, setMostrarDialogoTickets] = useState(false);
@@ -315,6 +315,19 @@ export function Registro() {
     () => eventosActivos.find((evento) => evento.id === eventoId),
     [eventosActivos, eventoId]
   );
+  const cuponAutomatico = useMemo(
+    () => eventoSeleccionado?.evento_cupones.find((config) => config.metodo_pago_id === metodoSeleccionado)?.cupones,
+    [eventoSeleccionado, metodoSeleccionado],
+  );
+  const metodoPagoIdsConfigurados = useMemo(
+    () => new Set((eventoSeleccionado?.evento_cupones ?? []).map((config) => config.metodo_pago_id).filter(Boolean)),
+    [eventoSeleccionado],
+  );
+  useEffect(() => {
+    if (metodoSeleccionado && !metodoPagoIdsConfigurados.has(metodoSeleccionado)) {
+      setMetodoSeleccionado('');
+    }
+  }, [metodoPagoIdsConfigurados, metodoSeleccionado]);
   const localesFiltradosPorEvento = useMemo(() => {
     if (!eventoId || !eventoSeleccionado) return localesDisponibles;
     const categoriasGenerales = new Set(eventoSeleccionado.evento_categorias.map((item) => item.categoria_id));
@@ -379,15 +392,15 @@ export function Registro() {
     return Math.max(totalFactura - calcularTotalMetodos(), 0);
   };
 
-  const calcularResultadoFactura = (
+  const calcularResultadoMetodos = (
     evento: EventoActivo | undefined,
-    montoFactura: number,
+    metodos: MetodoPagoLocal[],
     saldoActual: number,
-    cuponNumero = 1,
     acumulaSaldo = true,
   ) => {
     const valorMinimo = evento?.valor_minimo ?? 0;
     const valorMaximo = evento?.valor_maximo ?? 0;
+    const montoFactura = metodos.reduce((total, metodo) => total + metodo.monto, 0);
 
     if (!valorMinimo || valorMinimo <= 0 || !Number.isFinite(montoFactura) || montoFactura <= 0) {
       return {
@@ -395,6 +408,7 @@ export function Registro() {
         saldoNuevo: parseFloat(saldoActual.toFixed(2)),
         excedenteDescartado: 0,
         maxTicketsFactura: 0,
+        metodos: metodos.map((metodo) => ({ ...metodo, entregablesCalculados: 0 })),
       };
     }
 
@@ -403,33 +417,38 @@ export function Registro() {
     const maxTicketsFactura = valorMaximo > 0
       ? Math.floor(valorMaximo / valorMinimo)
       : Number.POSITIVE_INFINITY;
-    const montoDisponible = montoPermitido + (acumulaSaldo ? saldoActual : 0);
-    const ticketsBaseSinTope = Math.floor(montoDisponible / valorMinimo);
-    const ticketsSinTope = ticketsBaseSinTope * cuponNumero;
-    const tickets = Math.min(ticketsSinTope, maxTicketsFactura);
-    const ticketsBaseConsumidos = cuponNumero > 0
-      ? Math.ceil(tickets / cuponNumero)
-      : tickets;
-    const montoConsumido = ticketsBaseConsumidos * valorMinimo;
-    const saldoNuevo = acumulaSaldo
-      ? parseFloat(Math.max(montoDisponible - montoConsumido, 0).toFixed(2))
-      : parseFloat(saldoActual.toFixed(2));
+    let montoPermitidoRestante = montoPermitido;
+    let ticketsDisponibles = maxTicketsFactura;
+    let tickets = 0;
+    let saldoNuevo = acumulaSaldo ? 0 : saldoActual;
+
+    const metodosCalculados = metodos.map((metodo, index) => {
+      const montoAplicable = Math.min(metodo.monto, montoPermitidoRestante);
+      montoPermitidoRestante = Math.max(montoPermitidoRestante - montoAplicable, 0);
+      const saldoAplicable = acumulaSaldo && index === 0 ? saldoActual : 0;
+      const montoDisponible = montoAplicable + saldoAplicable;
+      const multiplicador = Math.max(metodo.cuponNumero ?? 1, 1);
+      const ticketsBase = Math.floor(montoDisponible / valorMinimo);
+      const ticketsMetodo = Math.min(ticketsBase * multiplicador, ticketsDisponibles);
+      ticketsDisponibles = Math.max(ticketsDisponibles - ticketsMetodo, 0);
+      tickets += ticketsMetodo;
+
+      if (acumulaSaldo) {
+        const unidadesBaseConsumidas = Math.ceil(ticketsMetodo / multiplicador);
+        saldoNuevo += Math.max(montoDisponible - (unidadesBaseConsumidas * valorMinimo), 0);
+      }
+
+      return { ...metodo, entregablesCalculados: ticketsMetodo };
+    });
 
     return {
       tickets,
-      saldoNuevo,
+      saldoNuevo: parseFloat(saldoNuevo.toFixed(2)),
       excedenteDescartado: parseFloat(excedenteDescartado.toFixed(2)),
       maxTicketsFactura: Number.isFinite(maxTicketsFactura) ? maxTicketsFactura : 0,
+      metodos: metodosCalculados,
     };
   };
-
-  const distribuirEntregablesEnMetodos = (
-    metodos: MetodoPagoLocal[],
-    totalEntregables: number
-  ) => metodos.map((metodo, index) => ({
-    ...metodo,
-    entregablesCalculados: index === 0 ? totalEntregables : 0,
-  }));
 
   const calcularSaldoAGenerar = () => {
     if (metodosPago.length === 0) return null;
@@ -437,11 +456,10 @@ export function Registro() {
     const montoFactura = parseFloat(montoTotal);
     if (!evento || !Number.isFinite(montoFactura) || montoFactura <= 0) return null;
     const parametros = resolverParametrosCalculo(evento, localId);
-    const resultado = calcularResultadoFactura(
+    const resultado = calcularResultadoMetodos(
       { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo },
-      montoFactura,
+      metodosPago,
       saldoAnterior,
-      1,
       parametros.acumulaSaldo,
     );
     return parametros.acumulaSaldo ? resultado.saldoNuevo : 0;
@@ -451,15 +469,6 @@ export function Registro() {
     const saldoPendiente = calcularSaldoPendiente();
     setMontoMetodo(saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '');
   }, [montoTotal, metodosPago]);
-
-  useEffect(() => {
-    const cuponesEvento = eventosActivos.find((e) => e.id === eventoId)?.evento_cupones ?? [];
-    if (cuponesEvento.length === 1) {
-      setCuponSeleccionado(cuponesEvento[0].cupones.id);
-    } else if (!cuponesEvento.some((ec) => ec.cupones.id === cuponSeleccionado)) {
-      setCuponSeleccionado('');
-    }
-  }, [eventoId, eventosActivos, cuponSeleccionado]);
 
   useEffect(() => {
     if (!clienteId || !eventoId) {
@@ -504,10 +513,6 @@ export function Registro() {
       toast.error('Debes seleccionar un evento primero');
       return;
     }
-    if (!cuponSeleccionado) {
-      toast.error('Selecciona un cupón');
-      return;
-    }
     const monto = parseFloat(montoMetodo);
     if (isNaN(monto) || monto <= 0) {
       toast.error('El monto debe ser mayor a 0');
@@ -540,9 +545,9 @@ export function Registro() {
     let cuponId: string | undefined = undefined;
 
     const eventoCupones = eventosActivos.find((e) => e.id === eventoId)?.evento_cupones ?? [];
-    const cupon = eventoCupones.find((ec) => ec.cupones.id === cuponSeleccionado)?.cupones;
+    const cupon = eventoCupones.find((ec) => ec.metodo_pago_id === metodoSeleccionado)?.cupones;
     if (!cupon) {
-      toast.error('Selecciona un cupón válido');
+      toast.error('Este método de pago no tiene un cupón configurado para la campaña');
       return;
     }
     cuponNumero = cupon.numero;
@@ -561,13 +566,11 @@ export function Registro() {
         entregablesCalculados: 0,
       },
     ];
-    const cuponNumeroFactura = metodosPago[0]?.cuponNumero ?? cuponNumero;
     const parametros = resolverParametrosCalculo(evento, localId);
-    const resultadoFactura = calcularResultadoFactura(
+    const resultadoFactura = calcularResultadoMetodos(
       evento ? { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo } : undefined,
-      totalActual + monto,
+      nuevosMetodos,
       saldoAnterior,
-      cuponNumeroFactura,
       parametros.acumulaSaldo,
     );
 
@@ -579,14 +582,22 @@ export function Registro() {
       );
     }
 
-    setMetodosPago(distribuirEntregablesEnMetodos(nuevosMetodos, resultadoFactura.tickets));
+    setMetodosPago(resultadoFactura.metodos);
 
     setMetodoSeleccionado('');
-    setCuponSeleccionado('');
   };
 
   const eliminarMetodoPago = (index: number) => {
-    setMetodosPago(metodosPago.filter((_, i) => i !== index));
+    const metodosRestantes = metodosPago.filter((_, i) => i !== index);
+    const evento = eventosActivos.find((item) => item.id === eventoId);
+    const parametros = resolverParametrosCalculo(evento, localId);
+    const resultado = calcularResultadoMetodos(
+      evento ? { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo } : undefined,
+      metodosRestantes,
+      saldoAnterior,
+      parametros.acumulaSaldo,
+    );
+    setMetodosPago(resultado.metodos);
   };
 
   const obtenerCuponAplicado = (metodos: MetodoPagoLocal[]) => {
@@ -605,7 +616,6 @@ export function Registro() {
     setMetodosPago([]);
     setMetodoSeleccionado('');
     setMontoMetodo('');
-    setCuponSeleccionado('');
   };
 
   // Limpiar todo (cliente, evento y factura)
@@ -798,19 +808,17 @@ export function Registro() {
     const parametrosCalculo = resolverParametrosCalculo(eventoSeleccionado, localId);
     const eventoValorMinimo = parametrosCalculo.valorMinimo;
     const localNombre = localesDisponibles.find((l) => l.id === localId)?.nombre || '';
-    const cuponNumeroFactura = metodosPago[0]?.cuponNumero ?? 1;
-    const resultadoFactura = calcularResultadoFactura(
+    const resultadoFactura = calcularResultadoMetodos(
       eventoSeleccionado ? {
         ...eventoSeleccionado,
         valor_minimo: parametrosCalculo.valorMinimo,
         valor_maximo: parametrosCalculo.valorMaximo,
       } : undefined,
-      montoTotalNum,
+      metodosPago,
       saldoAnterior,
-      cuponNumeroFactura,
       parametrosCalculo.acumulaSaldo,
     );
-    const metodosPagoCalculados = distribuirEntregablesEnMetodos(metodosPago, resultadoFactura.tickets);
+    const metodosPagoCalculados = resultadoFactura.metodos;
 
     if (resultadoFactura.excedenteDescartado > 0) {
       toast.warning(
@@ -1578,7 +1586,7 @@ export function Registro() {
                         <SelectValue placeholder="Selecciona método" />
                       </SelectTrigger>
                       <SelectContent>
-                        {metodosPagoDisponibles.map((metodo) => (
+                        {metodosPagoDisponibles.filter((metodo) => metodoPagoIdsConfigurados.has(metodo.id)).map((metodo) => (
                           <SelectItem key={metodo.id} value={metodo.id}>
                             {metodo.nombre}
                           </SelectItem>
@@ -1600,26 +1608,12 @@ export function Registro() {
                   </div>
 
                   <div>
-                    <Label htmlFor="cuponMetodo">Cupón *</Label>
-                    <Select
-                      value={cuponSeleccionado}
-                      onValueChange={setCuponSeleccionado}
-                      disabled={!eventoId}
-                    >
-                      <SelectTrigger id="cuponMetodo">
-                        <SelectValue placeholder={eventoId ? "Selecciona cupón" : "Selecciona evento primero"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {eventoId &&
-                          eventosActivos
-                            .find((e) => e.id === eventoId)
-                            ?.evento_cupones.map(({ cupones }) => (
-                              <SelectItem key={cupones.id} value={cupones.id}>
-                                {cupones.nombre} (x{cupones.numero})
-                              </SelectItem>
-                            ))}
-                      </SelectContent>
-                    </Select>
+                    <Label>Cupón automático</Label>
+                    <div className="flex min-h-10 items-center rounded-md border border-input bg-muted/60 px-3 text-sm" aria-live="polite">
+                      {cuponAutomatico
+                        ? <span className="font-medium text-foreground">{cuponAutomatico.nombre} (x{cuponAutomatico.numero})</span>
+                        : <span className="text-muted-foreground">{eventoId ? 'Selecciona un método' : 'Selecciona un evento primero'}</span>}
+                    </div>
                   </div>
 
                   <div className="flex items-end">
@@ -1656,7 +1650,7 @@ export function Registro() {
                               </Badge>
                             )}
                             <Badge variant="default" className="bg-green-600">
-                              {metodo.entregablesCalculados} {metodo.entregablesCalculados === 1 ? 'entregable' : 'entregables'}
+                              {metodo.entregablesCalculados} {metodo.entregablesCalculados === 1 ? 'ticket' : 'tickets'}
                             </Badge>
                           </div>
                           <Button
@@ -1677,7 +1671,7 @@ export function Registro() {
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="font-semibold">Total Entregables:</span>
+                        <span className="font-semibold">Total de tickets generados:</span>
                         <span className="text-lg font-bold text-green-600">
                           {metodosPago.reduce((sum, m) => sum + (m.entregablesCalculados || 0), 0)}
                         </span>
@@ -1731,7 +1725,7 @@ export function Registro() {
                           <TableHead>Cliente</TableHead>
                           <TableHead>No. Factura</TableHead>
                           <TableHead>Monto Total</TableHead>
-                          <TableHead>Total Entregables</TableHead>
+                          <TableHead>Total de tickets</TableHead>
                           <TableHead>Fecha Emisión</TableHead>
                           <TableHead>Métodos de Pago</TableHead>
                         </TableRow>
@@ -1757,7 +1751,7 @@ export function Registro() {
                                       </span>
                                     )}
                                     <span className="ml-2 text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">
-                                      {metodo.entregablesCalculados} entregables
+                                      {metodo.entregablesCalculados} tickets
                                     </span>
                                   </div>
                                 ))}
@@ -1808,7 +1802,7 @@ export function Registro() {
                         <TableHead>Género</TableHead>
                         <TableHead>No. Factura</TableHead>
                         <TableHead>Monto Total</TableHead>
-                        <TableHead>Total Entregables</TableHead>
+                        <TableHead>Total de tickets</TableHead>
                         <TableHead>Fecha Emisión</TableHead>
                         <TableHead>Métodos de Pago</TableHead>
                         <TableHead>Hora Registro</TableHead>
@@ -1848,7 +1842,7 @@ export function Registro() {
                                     </span>
                                   )}
                                   <span className="ml-2 text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">
-                                    {metodo.entregables_calculados} entregables
+                                    {metodo.entregables_calculados} tickets
                                   </span>
                                 </div>
                               ))}

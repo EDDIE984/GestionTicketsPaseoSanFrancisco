@@ -8,7 +8,7 @@ import { Switch } from '@/app/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
-import type { EventoCampana, EventoReglaCalculo, Categoria, Cupon, Entregable, Local } from '@/lib/types';
+import type { EventoCampana, EventoCuponConfiguracion, EventoReglaCalculo, Categoria, Cupon, Entregable, Local, MetodoPago } from '@/lib/types';
 import {
   fetchEventos,
   createEvento,
@@ -19,6 +19,7 @@ import { fetchCategorias } from '@/lib/api/categorias';
 import { fetchCupones } from '@/lib/api/cupones';
 import { fetchEntregables } from '@/lib/api/entregables';
 import { fetchLocales } from '@/lib/api/locales';
+import { fetchMetodosPago } from '@/lib/api/metodos-pago';
 
 const toDateTimeInputValue = (value?: string) => {
   if (!value) return '';
@@ -75,9 +76,20 @@ const validarEvento = (form: Partial<EventoCampana>) => {
   if ((form.valor_maximo ?? 0) > 0 && (form.valor_minimo ?? 0) > (form.valor_maximo ?? 0)) {
     return 'El valor mínimo no puede ser mayor que el valor máximo';
   }
+  const cuponConfiguraciones = form.cupon_configuraciones ?? [];
+  if ((form.cupon_ids ?? []).some((cuponId) => !cuponConfiguraciones.some((config) => config.cupon_id === cuponId && config.metodo_pago_id))) {
+    return 'Asigna un método de pago a cada cupón seleccionado';
+  }
+  const metodosConfigurados = cuponConfiguraciones.map((config) => config.metodo_pago_id).filter(Boolean);
+  if (new Set(metodosConfigurados).size !== metodosConfigurados.length) {
+    return 'Un método de pago no puede estar asignado a más de un cupón del evento';
+  }
   const reglas = form.reglas_calculo ?? [];
   for (const regla of reglas) {
     if (!regla.categoria_id) return 'Selecciona una categoría en cada excepción';
+    if (!(form.categoria_ids ?? []).includes(regla.categoria_id)) {
+      return 'Las categorías excluidas no pueden tener excepciones de cálculo';
+    }
     if (regla.valor_minimo <= 0) return 'El valor mínimo de cada excepción debe ser mayor a 0';
     if (regla.valor_maximo < 0 || (regla.valor_maximo > 0 && regla.valor_minimo > regla.valor_maximo)) {
       return 'Revisa los valores mínimo y máximo de las excepciones';
@@ -94,11 +106,13 @@ const validarEvento = (form: Partial<EventoCampana>) => {
 function ReglasCalculoEditor({
   value,
   categorias,
+  categoriaIdsParticipantes,
   locales,
   onChange,
 }: {
   value: EventoReglaCalculo[];
   categorias: Categoria[];
+  categoriaIdsParticipantes: string[];
   locales: Local[];
   onChange: (reglas: EventoReglaCalculo[]) => void;
 }) {
@@ -119,7 +133,9 @@ function ReglasCalculoEditor({
       <div className="flex items-start justify-between gap-4">
         <div>
           <Label className="text-base font-semibold text-slate-900">Excepciones de cálculo</Label>
-          <p className="mt-1 text-xs text-slate-600">Usan el mismo cálculo de la campaña con valores distintos. Una regla de local tiene prioridad sobre la regla de categoría.</p>
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600">
+            Solo puedes crear excepciones para categorías participantes. Las categorías excluidas no aparecerán en el selector. Una regla de local tiene prioridad sobre la regla de categoría.
+          </p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={addRegla}>
           <Plus className="mr-1 h-4 w-4" /> Agregar
@@ -143,7 +159,11 @@ function ReglasCalculoEditor({
                   <Label>Categoría</Label>
                   <Select value={regla.categoria_id} onValueChange={(categoria_id) => updateRegla(index, { categoria_id, local_ids: [] })}>
                     <SelectTrigger><SelectValue placeholder="Selecciona categoría" /></SelectTrigger>
-                    <SelectContent>{categorias.filter((c) => c.activo).map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      {categorias
+                        .filter((c) => c.activo && categoriaIdsParticipantes.includes(c.id))
+                        .map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div>
@@ -216,6 +236,7 @@ export function EventosCampanas() {
   const [cupones, setCupones] = useState<Cupon[]>([]);
   const [entregables, setEntregables] = useState<Entregable[]>([]);
   const [locales, setLocales] = useState<Local[]>([]);
+  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
 
   useEffect(() => {
     fetchEventos().then(setEventos).catch(() => toast.error('Error al cargar eventos'));
@@ -223,6 +244,7 @@ export function EventosCampanas() {
     fetchCupones().then(setCupones).catch(() => {});
     fetchEntregables().then(setEntregables).catch(() => {});
     fetchLocales().then(setLocales).catch(() => {});
+    fetchMetodosPago().then(setMetodosPago).catch(() => {});
   }, []);
 
   const handleAdd = async (form: Omit<EventoCampana, 'id' | 'created_at'>) => {
@@ -234,6 +256,7 @@ export function EventosCampanas() {
       activo: form.activo ?? true,
       categoria_ids: form.categoria_ids ?? activeCategoriaIds,
       cupon_ids: form.cupon_ids ?? [],
+      cupon_configuraciones: form.cupon_configuraciones ?? [],
       entregable_ids: form.entregable_ids ?? [],
       reglas_calculo: form.reglas_calculo ?? [],
     };
@@ -253,6 +276,7 @@ export function EventosCampanas() {
         activo: normalizedForm.activo,
         categoria_ids: normalizedForm.categoria_ids,
         cupon_ids: normalizedForm.cupon_ids,
+        cupon_configuraciones: normalizedForm.cupon_configuraciones,
         entregable_ids: normalizedForm.entregable_ids,
         reglas_calculo: normalizedForm.reglas_calculo,
       });
@@ -298,6 +322,7 @@ export function EventosCampanas() {
   ) => {
     const [localCategorias, setLocalCategorias] = React.useState<string[]>(item?.categoria_ids ?? []);
     const [localCupones, setLocalCupones] = React.useState<string[]>(item?.cupon_ids ?? []);
+    const [localCuponConfiguraciones, setLocalCuponConfiguraciones] = React.useState<EventoCuponConfiguracion[]>(item?.cupon_configuraciones ?? []);
     const [localEntregables, setLocalEntregables] = React.useState<string[]>(item?.entregable_ids ?? []);
     const [localReglas, setLocalReglas] = React.useState<EventoReglaCalculo[]>(item?.reglas_calculo ?? []);
     const categoriasActivas = categorias.filter((c) => c.activo);
@@ -311,6 +336,8 @@ export function EventosCampanas() {
       setLocalCategorias(categoriasParticipantes);
       onChange('categoria_ids', categoriasParticipantes);
       setLocalCupones(item?.cupon_ids ?? []);
+      setLocalCuponConfiguraciones(item?.cupon_configuraciones ?? []);
+      onChange('cupon_configuraciones', item?.cupon_configuraciones ?? []);
       setLocalEntregables(item?.entregable_ids ?? []);
       setLocalReglas(item?.reglas_calculo ?? []);
       onChange('reglas_calculo', item?.reglas_calculo ?? []);
@@ -328,11 +355,32 @@ export function EventosCampanas() {
         : Array.from(new Set([...localCategorias, id]));
       setLocalCategorias(updated);
       onChange('categoria_ids', updated);
+      if (checked) {
+        const reglasCompatibles = localReglas.filter((regla) => regla.categoria_id !== id);
+        if (reglasCompatibles.length !== localReglas.length) {
+          setLocalReglas(reglasCompatibles);
+          onChange('reglas_calculo', reglasCompatibles);
+          const categoria = categorias.find((item) => item.id === id);
+          toast.info(`Se eliminaron las excepciones de ${categoria?.nombre ?? 'la categoría'} porque quedó excluida`);
+        }
+      }
     };
     const toggleCupon = (id: string, checked: boolean) => {
       const updated = checked ? [...localCupones, id] : localCupones.filter((x) => x !== id);
+      const configuracionesActualizadas = checked
+        ? [...localCuponConfiguraciones, { cupon_id: id, metodo_pago_id: '' }]
+        : localCuponConfiguraciones.filter((config) => config.cupon_id !== id);
       setLocalCupones(updated);
+      setLocalCuponConfiguraciones(configuracionesActualizadas);
       onChange('cupon_ids', updated);
+      onChange('cupon_configuraciones', configuracionesActualizadas);
+    };
+    const asignarMetodoCupon = (cuponId: string, metodoPagoId: string) => {
+      const configuracionesActualizadas = localCuponConfiguraciones.map((config) =>
+        config.cupon_id === cuponId ? { ...config, metodo_pago_id: metodoPagoId } : config,
+      );
+      setLocalCuponConfiguraciones(configuracionesActualizadas);
+      onChange('cupon_configuraciones', configuracionesActualizadas);
     };
     const toggleEntregable = (id: string, checked: boolean) => {
       const updated = checked ? [...localEntregables, id] : localEntregables.filter((x) => x !== id);
@@ -359,7 +407,7 @@ export function EventosCampanas() {
               <div>
                 <Label className="text-base font-semibold">Categorías excluidas</Label>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Todas las categorías activas participan por defecto. Marca solo las que no aplican.
+                  Todas participan por defecto. Una categoría excluida no podrá tener excepciones de cálculo. Si ya tiene una excepción, se eliminará al excluirla.
                 </p>
               </div>
               {categoriasExcluidas.length > 0 && (
@@ -451,16 +499,39 @@ export function EventosCampanas() {
 
           {/* Cupones */}
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-lg p-6 border border-border">
-            <Label className="text-base font-semibold mb-4 block">Cupones del evento</Label>
-            <div className="max-h-48 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Label className="text-base font-semibold block">Cupones y métodos de pago</Label>
+            <p className="mb-4 mt-1 text-xs leading-relaxed text-muted-foreground">
+              Selecciona los cupones del evento y asigna un método diferente a cada uno. En Registro, el cupón se aplicará automáticamente al elegir el método de pago.
+            </p>
+            <div className="max-h-64 space-y-2 overflow-y-auto">
               {cupones.filter((c) => c.activo).map((c) => (
-                <label key={c.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent/60 cursor-pointer">
-                  <Checkbox
-                    checked={localCupones.includes(c.id)}
-                    onCheckedChange={(checked) => toggleCupon(c.id, !!checked)}
-                  />
-                  <span className="text-sm font-medium">{c.nombre} (x{c.numero})</span>
-                </label>
+                <div key={c.id} className="grid gap-3 rounded-lg border border-border/70 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(220px,1fr)] sm:items-center">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                    <Checkbox
+                      checked={localCupones.includes(c.id)}
+                      onCheckedChange={(checked) => toggleCupon(c.id, !!checked)}
+                    />
+                    <span className="text-sm font-medium">{c.nombre} (x{c.numero})</span>
+                  </label>
+                  {localCupones.includes(c.id) && (
+                    <Select
+                      value={localCuponConfiguraciones.find((config) => config.cupon_id === c.id)?.metodo_pago_id ?? ''}
+                      onValueChange={(metodoPagoId) => asignarMetodoCupon(c.id, metodoPagoId)}
+                    >
+                      <SelectTrigger aria-label={`Método de pago para ${c.nombre}`}>
+                        <SelectValue placeholder="Asigna método de pago" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {metodosPago.filter((metodo) => metodo.activo).map((metodo) => {
+                          const usadoPorOtroCupon = localCuponConfiguraciones.some((config) =>
+                            config.cupon_id !== c.id && config.metodo_pago_id === metodo.id,
+                          );
+                          return <SelectItem key={metodo.id} value={metodo.id} disabled={usadoPorOtroCupon}>{metodo.nombre}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -484,6 +555,7 @@ export function EventosCampanas() {
           <ReglasCalculoEditor
             value={localReglas}
             categorias={categorias}
+            categoriaIdsParticipantes={localCategorias}
             locales={locales}
             onChange={(reglas) => {
               setLocalReglas(reglas);

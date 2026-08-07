@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { EventoCampana, EventoReglaCalculo } from '@/lib/types';
+import type { EventoCampana, EventoCuponConfiguracion, EventoReglaCalculo } from '@/lib/types';
 
 type RawEvento = {
   id: string;
@@ -11,7 +11,7 @@ type RawEvento = {
   activo: boolean;
   created_at: string;
   evento_categorias: { categoria_id: string }[];
-  evento_cupones: { cupon_id: string }[];
+  evento_cupones: { cupon_id: string; metodo_pago_id: string | null }[];
   evento_entregables: { entregable_id: string }[];
   evento_reglas_calculo: Array<Omit<EventoReglaCalculo, 'local_ids'> & {
     evento_regla_locales: Array<{ local_id: string }>;
@@ -30,6 +30,10 @@ function mapRawEvento(raw: RawEvento): EventoCampana {
     created_at: raw.created_at,
     categoria_ids: raw.evento_categorias.map((r) => r.categoria_id),
     cupon_ids: raw.evento_cupones.map((r) => r.cupon_id),
+    cupon_configuraciones: raw.evento_cupones.map((r) => ({
+      cupon_id: r.cupon_id,
+      metodo_pago_id: r.metodo_pago_id ?? '',
+    })),
     entregable_ids: raw.evento_entregables.map((r) => r.entregable_id),
     reglas_calculo: (raw.evento_reglas_calculo ?? []).map((regla) => ({
       ...regla,
@@ -44,7 +48,7 @@ export async function fetchEventos(): Promise<EventoCampana[]> {
     .select(`
       *,
       evento_categorias(categoria_id),
-      evento_cupones(cupon_id),
+      evento_cupones(cupon_id, metodo_pago_id),
       evento_entregables(entregable_id),
       evento_reglas_calculo(id, categoria_id, aplica_todos, acumula_saldo, valor_minimo, valor_maximo, activo, evento_regla_locales(local_id))
     `)
@@ -62,10 +66,11 @@ export async function createEvento(payload: {
   activo: boolean;
   categoria_ids: string[];
   cupon_ids: string[];
+  cupon_configuraciones: EventoCuponConfiguracion[];
   entregable_ids: string[];
   reglas_calculo: EventoReglaCalculo[];
 }): Promise<EventoCampana> {
-  const { categoria_ids, cupon_ids, entregable_ids, reglas_calculo, ...eventoData } = payload;
+  const { categoria_ids, cupon_ids, cupon_configuraciones, entregable_ids, reglas_calculo, ...eventoData } = payload;
 
   const { data: evento, error } = await supabase
     .from('eventos_campanas')
@@ -74,13 +79,14 @@ export async function createEvento(payload: {
     .single();
   if (error) throw error;
 
-  await insertPivots(evento.id, categoria_ids, cupon_ids, entregable_ids);
+  await insertPivots(evento.id, categoria_ids, cupon_configuraciones, entregable_ids);
   await replaceReglas(evento.id, reglas_calculo);
 
   return {
     ...evento,
     categoria_ids,
     cupon_ids,
+    cupon_configuraciones,
     entregable_ids,
     reglas_calculo,
   };
@@ -97,11 +103,12 @@ export async function updateEvento(
     activo?: boolean;
     categoria_ids?: string[];
     cupon_ids?: string[];
+    cupon_configuraciones?: EventoCuponConfiguracion[];
     entregable_ids?: string[];
     reglas_calculo?: EventoReglaCalculo[];
   }
 ): Promise<EventoCampana> {
-  const { categoria_ids, cupon_ids, entregable_ids, reglas_calculo, ...eventoData } = payload;
+  const { categoria_ids, cupon_ids, cupon_configuraciones, entregable_ids, reglas_calculo, ...eventoData } = payload;
 
   if (Object.keys(eventoData).length > 0) {
     const { error } = await supabase
@@ -125,16 +132,16 @@ export async function updateEvento(
     }
   }
 
-  if (cupon_ids !== undefined) {
+  if (cupon_configuraciones !== undefined) {
     const { error: delErr } = await supabase
       .from('evento_cupones')
       .delete()
       .eq('evento_id', id);
     if (delErr) throw delErr;
-    if (cupon_ids.length > 0) {
+    if (cupon_configuraciones.length > 0) {
       const { error: insErr } = await supabase
         .from('evento_cupones')
-        .insert(cupon_ids.map((cid) => ({ evento_id: id, cupon_id: cid })));
+        .insert(cupon_configuraciones.map((config) => ({ evento_id: id, ...config })));
       if (insErr) throw insErr;
     }
   }
@@ -172,7 +179,7 @@ async function fetchEventoById(id: string): Promise<EventoCampana> {
     .select(`
       *,
       evento_categorias(categoria_id),
-      evento_cupones(cupon_id),
+      evento_cupones(cupon_id, metodo_pago_id),
       evento_entregables(entregable_id),
       evento_reglas_calculo(id, categoria_id, aplica_todos, acumula_saldo, valor_minimo, valor_maximo, activo, evento_regla_locales(local_id))
     `)
@@ -219,7 +226,7 @@ async function replaceReglas(eventoId: string, reglas: EventoReglaCalculo[]): Pr
 async function insertPivots(
   eventoId: string,
   categoriaIds: string[],
-  cuponIds: string[],
+  cuponConfiguraciones: EventoCuponConfiguracion[],
   entregableIds: string[]
 ): Promise<void> {
   const ops: Promise<any>[] = [];
@@ -230,10 +237,10 @@ async function insertPivots(
       )
     );
   }
-  if (cuponIds.length > 0) {
+  if (cuponConfiguraciones.length > 0) {
     ops.push(
       supabase.from('evento_cupones').insert(
-        cuponIds.map((id) => ({ evento_id: eventoId, cupon_id: id }))
+        cuponConfiguraciones.map((config) => ({ evento_id: eventoId, ...config }))
       )
     );
   }

@@ -111,8 +111,13 @@ CREATE TABLE evento_categorias (
 CREATE TABLE evento_cupones (
   evento_id UUID NOT NULL REFERENCES eventos_campanas(id) ON DELETE CASCADE,
   cupon_id  UUID NOT NULL REFERENCES cupones(id) ON DELETE CASCADE,
+  metodo_pago_id UUID REFERENCES metodos_pago(id) ON DELETE RESTRICT,
   PRIMARY KEY (evento_id, cupon_id)
 );
+
+CREATE UNIQUE INDEX evento_cupones_metodo_pago_unique
+  ON evento_cupones(evento_id, metodo_pago_id)
+  WHERE metodo_pago_id IS NOT NULL;
 
 -- M:N evento ↔ entregables
 CREATE TABLE evento_entregables (

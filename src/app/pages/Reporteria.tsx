@@ -38,6 +38,7 @@ import {
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Info,
   Loader2,
   Receipt,
   ShoppingCart,
@@ -69,6 +70,15 @@ const meses = [
 
 const COLORS = ['#0f766e', '#2563eb', '#c2410c', '#9333ea', '#ca8a04', '#4f46e5'];
 const diasDelMes = Array.from({ length: 31 }, (_, i) => i + 1);
+
+function getFiltroHoy() {
+  const hoy = new Date();
+  return {
+    year: hoy.getFullYear(),
+    month: hoy.getMonth(),
+    day: String(hoy.getDate()),
+  };
+}
 
 function formatMiles(value: number | string | null | undefined, decimals = 0) {
   const parsed = parseNumber(value);
@@ -178,12 +188,14 @@ function renderCategoriaLegend(
 }
 
 export function Reporteria() {
+  const filtroHoy = getFiltroHoy();
   const [eventos, setEventos] = useState<ReporteriaEvento[]>([]);
   const [facturas, setFacturas] = useState<ReporteriaFactura[]>([]);
   const [campaniaSeleccionada, setCampaniaSeleccionada] = useState('');
-  const [mesesSeleccionados, setMesesSeleccionados] = useState<number[]>([]);
-  const [diaDesde, setDiaDesde] = useState('todos');
-  const [diaHasta, setDiaHasta] = useState('todos');
+  const [anioSeleccionado, setAnioSeleccionado] = useState<number | null>(filtroHoy.year);
+  const [mesesSeleccionados, setMesesSeleccionados] = useState<number[]>([filtroHoy.month]);
+  const [diaDesde, setDiaDesde] = useState(filtroHoy.day);
+  const [diaHasta, setDiaHasta] = useState(filtroHoy.day);
   const [cargandoEventos, setCargandoEventos] = useState(true);
   const [cargandoFacturas, setCargandoFacturas] = useState(false);
 
@@ -220,10 +232,12 @@ export function Reporteria() {
   };
 
   const handleCampaniaChange = (eventoId: string) => {
+    const hoy = getFiltroHoy();
     setCampaniaSeleccionada(eventoId);
-    setMesesSeleccionados([]);
-    setDiaDesde('todos');
-    setDiaHasta('todos');
+    setAnioSeleccionado(hoy.year);
+    setMesesSeleccionados([hoy.month]);
+    setDiaDesde(hoy.day);
+    setDiaHasta(hoy.day);
   };
 
   const handleDiaDesdeChange = (value: string) => {
@@ -240,6 +254,27 @@ export function Reporteria() {
     }
   };
 
+  const resumenFiltroDias = useMemo(() => {
+    const nombresMeses = meses
+      .filter((mes) => mesesSeleccionados.includes(mes.valor))
+      .map((mes) => mes.nombre);
+    const mesesTexto = nombresMeses.length > 0 ? nombresMeses.join(' y ') : 'todos los meses';
+
+    if (diaDesde === 'todos' && diaHasta === 'todos') {
+      return `Se incluyen todos los días de ${mesesTexto}.`;
+    }
+    if (diaDesde === diaHasta) {
+      return `Se incluye únicamente el día ${diaDesde} de ${mesesTexto}. No es un rango continuo entre meses.`;
+    }
+    if (diaDesde === 'todos') {
+      return `Se incluyen los días 1 al ${diaHasta} dentro de cada mes seleccionado: ${mesesTexto}.`;
+    }
+    if (diaHasta === 'todos') {
+      return `Se incluyen los días ${diaDesde} al final dentro de cada mes seleccionado: ${mesesTexto}.`;
+    }
+    return `Se incluyen los días ${diaDesde} al ${diaHasta} dentro de cada mes seleccionado: ${mesesTexto}.`;
+  }, [mesesSeleccionados, diaDesde, diaHasta]);
+
   const facturasFiltradas = useMemo(() => {
     const desde = diaDesde === 'todos' ? null : Number(diaDesde);
     const hasta = diaHasta === 'todos' ? null : Number(diaHasta);
@@ -247,13 +282,14 @@ export function Reporteria() {
     return facturas.filter((factura) => {
       const dateParts = getDateParts(factura.fecha_emision);
       if (!dateParts) return mesesSeleccionados.length === 0 && desde === null && hasta === null;
-      const { month, day } = dateParts;
+      const { year, month, day } = dateParts;
+      if (anioSeleccionado !== null && year !== anioSeleccionado) return false;
       if (mesesSeleccionados.length > 0 && !mesesSeleccionados.includes(month)) return false;
       if (desde !== null && day < desde) return false;
       if (hasta !== null && day > hasta) return false;
       return true;
     });
-  }, [facturas, mesesSeleccionados, diaDesde, diaHasta]);
+  }, [facturas, anioSeleccionado, mesesSeleccionados, diaDesde, diaHasta]);
 
   const kpis = useMemo(() => {
     const totalFacturas = facturasFiltradas.length;
@@ -448,13 +484,13 @@ export function Reporteria() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Calendar className="h-4 w-4" />
-                Rango de días
+                Días dentro de cada mes
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-500">Desde</Label>
+                  <Label className="text-xs text-slate-500">Día desde</Label>
                   <Select value={diaDesde} onValueChange={handleDiaDesdeChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Desde" />
@@ -470,7 +506,7 @@ export function Reporteria() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-500">Hasta</Label>
+                  <Label className="text-xs text-slate-500">Día hasta</Label>
                   <Select value={diaHasta} onValueChange={handleDiaHastaChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Hasta" />
@@ -486,8 +522,14 @@ export function Reporteria() {
                   </Select>
                 </div>
               </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950" role="status">
+                <div className="mb-1 flex items-center gap-1.5 font-semibold">
+                  <Info className="h-3.5 w-3.5" /> Así se aplicará el filtro
+                </div>
+                <p>{resumenFiltroDias}</p>
+              </div>
               <p className="text-xs leading-5 text-slate-500">
-                Puedes elegir solo inicio, solo fin, o un rango completo dentro del mes.
+                Por defecto se muestra hoy. Usa “Limpiar filtros” para ver todo el histórico.
               </p>
             </CardContent>
           </Card>
@@ -497,6 +539,7 @@ export function Reporteria() {
             variant="outline"
             className="w-full"
             onClick={() => {
+              setAnioSeleccionado(null);
               setMesesSeleccionados([]);
               setDiaDesde('todos');
               setDiaHasta('todos');

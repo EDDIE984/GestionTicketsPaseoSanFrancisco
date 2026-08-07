@@ -68,8 +68,14 @@ export interface EventoCampana {
   // IDs derivados de las tablas pivote al hacer fetch
   categoria_ids: string[];
   cupon_ids: string[];
+  cupon_configuraciones: EventoCuponConfiguracion[];
   entregable_ids: string[];
   reglas_calculo: EventoReglaCalculo[];
+}
+
+export interface EventoCuponConfiguracion {
+  cupon_id: string;
+  metodo_pago_id: string;
 }
 
 export interface EventoReglaCalculo {
