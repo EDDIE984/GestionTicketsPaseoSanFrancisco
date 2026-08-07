@@ -166,6 +166,7 @@ interface MetodoPagoDisponible {
 export function Registro() {
   const { user, loading: cargandoSesion } = useAuth();
   const revisandoRegistroPendiente = useRef(false);
+  const impresionEnCursoRef = useRef(false);
 
   // Remote data
   const [eventosActivos, setEventosActivos] = useState<EventoActivo[]>([]);
@@ -968,6 +969,7 @@ export function Registro() {
       } satisfies RegistroPendientePersistido));
       setMostrarDialogoTickets(true);
       setTicketsImpresos(false);
+      impresionEnCursoRef.current = false;
 
       void Promise.all([
         fetchFacturasDelDia()
@@ -1121,44 +1123,59 @@ export function Registro() {
 
   // Función para imprimir tickets
   const imprimirTickets = async () => {
-    if (ticketsImpresos) return;
+    if (ticketsImpresos || impresionEnCursoRef.current) return;
 
-    const facturaIds = facturasActuales
+    const facturasEnviadas = [...facturasActuales];
+    const facturaIds = facturasEnviadas
       .map((factura) => factura.facturaId)
       .filter((id): id is string => Boolean(id));
 
-    if (facturaIds.length !== facturasActuales.length) {
+    if (facturaIds.length !== facturasEnviadas.length) {
       toast.error('No se pudo identificar todas las facturas para marcar la impresión');
       return;
     }
 
+    impresionEnCursoRef.current = true;
     setMarcandoImpresion(true);
     setMostrarOpcionPdfAdmin(false);
     try {
       const tickets = construirTicketsPos();
       const job = await enviarTicketsACola(tickets);
       sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
+      setMostrarDialogoTickets(false);
+      setFacturasActuales([]);
+      setFacturasPendientes([]);
+      limpiarCliente();
       toast.success(`Impresión enviada a la cola (${job.totalTickets} tickets)`);
 
-      void esperarTrabajoImpresion(job.jobId)
-        .then(async () => {
-          await marcarFacturasComoImpresas(facturaIds);
-          await enviarConsentimientosLuegoDeImprimir(facturasActuales);
-          setTicketsImpresos(true);
-          limpiarCliente();
-          const actualizadas = await fetchFacturasDelDia();
-          setFacturas(actualizadas);
-          setFacturasActuales([]);
-          setFacturasPendientes([]);
-          setMostrarDialogoTickets(false);
-          setMostrarOpcionPdfAdmin(false);
-          toast.success(`Tickets impresos correctamente (${job.totalTickets})`);
-        })
-        .catch((error) => {
+      void esperarTrabajoImpresion(job.jobId).then(
+        async () => {
+          impresionEnCursoRef.current = false;
+          try {
+            await marcarFacturasComoImpresas(facturaIds);
+            await enviarConsentimientosLuegoDeImprimir(facturasEnviadas);
+            setMostrarOpcionPdfAdmin(false);
+            toast.success(`Tickets impresos correctamente (${job.totalTickets})`);
+          } catch (error) {
+            toast.error(`Los tickets se imprimieron, pero no se pudo actualizar su estado. ${error instanceof Error ? error.message : ''}`.trim());
+          }
+          void fetchFacturasDelDia().then(setFacturas).catch(() => {});
+        },
+        (error) => {
+          impresionEnCursoRef.current = false;
+          setTicketsImpresos(false);
+          setFacturasActuales(facturasEnviadas);
+          sessionStorage.setItem(REGISTRO_PENDIENTE_KEY, JSON.stringify({
+            facturaIds,
+            usuarioId: user?.id ?? '',
+          } satisfies RegistroPendientePersistido));
+          setMostrarDialogoTickets(true);
           if (user?.rol === 'Admin') setMostrarOpcionPdfAdmin(true);
           toast.error(error instanceof Error ? error.message : 'No se pudo confirmar la impresión');
-        });
+        },
+      );
     } catch (error) {
+      impresionEnCursoRef.current = false;
       if (user?.rol === 'Admin') setMostrarOpcionPdfAdmin(true);
       toast.error(error instanceof Error ? error.message : 'No se pudo enviar los tickets a impresión');
     } finally {
