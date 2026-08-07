@@ -49,6 +49,7 @@ import {
   fetchFacturasDelDia,
   fetchEventosActivos,
   marcarFacturasComoImpresas,
+  marcarFacturasComoNoImpresas,
   reversarFacturasRegistro,
 } from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
@@ -225,6 +226,7 @@ export function Registro() {
   const [guardandoFacturas, setGuardandoFacturas] = useState(false);
   const [validandoFactura, setValidandoFactura] = useState(false);
   const [marcandoImpresion, setMarcandoImpresion] = useState(false);
+  const [cerrandoSinImprimir, setCerrandoSinImprimir] = useState(false);
   const [reversandoRegistro, setReversandoRegistro] = useState(false);
   // Estado de la factura actual
   const [localId, setLocalId] = useState('');
@@ -347,7 +349,7 @@ export function Registro() {
     }
   }, [localesFiltradosPorEvento, localId]);
 
-  const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion || reversandoRegistro;
+  const procesando = cargandoDatos || consultandoCedula || guardandoFacturas || validandoFactura || marcandoImpresion || cerrandoSinImprimir || reversandoRegistro;
   const mensajeProceso = guardandoFacturas
     ? 'Registrando facturas...'
     : consultandoCedula
@@ -1118,6 +1120,36 @@ export function Registro() {
       console.error('No se pudo registrar o enviar el consentimiento', error);
       const detalle = error instanceof Error ? error.message : 'No se pudo identificar el error';
       toast.error(`Los tickets se imprimieron, pero no se pudo procesar el consentimiento. ${detalle}`);
+    }
+  };
+
+  const cerrarTicketsSinImprimir = async () => {
+    if (impresionEnCursoRef.current || cerrandoSinImprimir) return;
+
+    const facturaIds = facturasActuales
+      .map((factura) => factura.facturaId)
+      .filter((id): id is string => Boolean(id));
+
+    if (facturaIds.length !== facturasActuales.length) {
+      toast.error('No se pudo identificar todas las facturas para cerrar el registro');
+      return;
+    }
+
+    setCerrandoSinImprimir(true);
+    try {
+      await marcarFacturasComoNoImpresas(facturaIds);
+      sessionStorage.removeItem(REGISTRO_PENDIENTE_KEY);
+      setTicketsImpresos(false);
+      setMostrarDialogoTickets(false);
+      setFacturasActuales([]);
+      setFacturasPendientes([]);
+      limpiarCliente();
+      setFacturas(await fetchFacturasDelDia());
+      toast.info('Registro guardado como no impreso');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar el registro como no impreso');
+    } finally {
+      setCerrandoSinImprimir(false);
     }
   };
 
@@ -2132,11 +2164,25 @@ export function Registro() {
               </div>
               <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t bg-white px-6 py-4">
                 <Button
+                  type="button"
+                  variant="outline"
+                  onClick={cerrarTicketsSinImprimir}
+                  size="lg"
+                  disabled={ticketsImpresos || marcandoImpresion || cerrandoSinImprimir || reversandoRegistro}
+                >
+                  {cerrandoSinImprimir ? (
+                    <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />
+                  ) : (
+                    <X className="mr-2 h-5 w-5" />
+                  )}
+                  {cerrandoSinImprimir ? 'Guardando...' : 'Cerrar sin imprimir'}
+                </Button>
+                <Button
                   variant="outline"
                   onClick={() => setMostrarConfirmacionReverso(true)}
                   size="lg"
                   className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                  disabled={ticketsImpresos || marcandoImpresion || reversandoRegistro}
+                  disabled={ticketsImpresos || marcandoImpresion || cerrandoSinImprimir || reversandoRegistro}
                 >
                   {reversandoRegistro ? (
                     <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
@@ -2152,6 +2198,7 @@ export function Registro() {
                   disabled={
                     ticketsImpresos ||
                     marcandoImpresion ||
+                    cerrandoSinImprimir ||
                     reversandoRegistro ||
                     facturasActuales.every((f) => f.totalEntregables === 0)
                   }
@@ -2170,7 +2217,7 @@ export function Registro() {
                     onClick={imprimirTicketsEnPdf}
                     size="lg"
                     className="border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-                    disabled={marcandoImpresion || reversandoRegistro || facturasActuales.every((f) => f.totalEntregables === 0)}
+                    disabled={marcandoImpresion || cerrandoSinImprimir || reversandoRegistro || facturasActuales.every((f) => f.totalEntregables === 0)}
                   >
                     <FileDown className="w-5 h-5 mr-2" />
                     Imprimir/Guardar PDF

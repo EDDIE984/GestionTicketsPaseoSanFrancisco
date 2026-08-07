@@ -50,6 +50,20 @@ export async function marcarFacturasComoImpresas(facturaIds: string[]): Promise<
   if (error) throw error;
 }
 
+export async function marcarFacturasComoNoImpresas(facturaIds: string[]): Promise<void> {
+  if (facturaIds.length === 0) return;
+
+  const { error } = await supabase
+    .from('facturas')
+    .update({
+      tickets_impresos: false,
+      tickets_impresos_at: null,
+    })
+    .in('id', facturaIds);
+
+  if (error) throw error;
+}
+
 export async function reversarFacturasRegistro(params: {
   facturaIds: string[];
   usuarioId: string;
