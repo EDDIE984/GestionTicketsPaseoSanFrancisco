@@ -145,6 +145,7 @@ export interface SaldoCliente {
   id: string;
   cliente_id: string;
   evento_id: string;
+  metodo_pago_id: string | null;
   saldo: number;
   updated_at: string;
 }
@@ -154,6 +155,7 @@ export interface HistorialSaldo {
   cliente_id: string;
   evento_id: string;
   factura_id: string;
+  metodo_pago_id: string | null;
   cupon_aplicado: string | null;
   saldo_anterior: number;
   saldo_nuevo: number;

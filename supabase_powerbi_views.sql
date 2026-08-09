@@ -159,10 +159,13 @@ SELECT
   sc.evento_id,
   e.nombre AS evento_nombre,
   sc.saldo,
-  sc.updated_at
+  sc.updated_at,
+  sc.metodo_pago_id,
+  COALESCE(mp.nombre, 'Saldo histórico sin clasificar') AS metodo_pago_nombre
 FROM saldo_clientes sc
 JOIN clientes c ON c.id = sc.cliente_id
-JOIN eventos_campanas e ON e.id = sc.evento_id;
+JOIN eventos_campanas e ON e.id = sc.evento_id
+LEFT JOIN metodos_pago mp ON mp.id = sc.metodo_pago_id;
 
 CREATE OR REPLACE VIEW vw_powerbi_historial_saldo AS
 SELECT
@@ -177,11 +180,14 @@ SELECT
   hs.cupon_aplicado,
   hs.saldo_anterior,
   hs.saldo_nuevo,
-  hs.tickets_generados
+  hs.tickets_generados,
+  hs.metodo_pago_id,
+  COALESCE(mp.nombre, 'Sin clasificar') AS metodo_pago_nombre
 FROM historial_saldo hs
 JOIN clientes c ON c.id = hs.cliente_id
 JOIN eventos_campanas e ON e.id = hs.evento_id
-JOIN facturas f ON f.id = hs.factura_id;
+JOIN facturas f ON f.id = hs.factura_id
+LEFT JOIN metodos_pago mp ON mp.id = hs.metodo_pago_id;
 
 CREATE OR REPLACE VIEW vw_powerbi_resumen_evento_diario AS
 SELECT

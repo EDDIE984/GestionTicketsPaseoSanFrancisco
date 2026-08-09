@@ -83,10 +83,10 @@ BEGIN
   END IF;
 
   WITH selected_pairs AS (
-    SELECT cliente_id, evento_id, MIN(created_at) AS min_selected_at
+    SELECT cliente_id, evento_id, metodo_pago_id, MIN(created_at) AS min_selected_at
     FROM historial_saldo
     WHERE factura_id IN (SELECT id FROM tmp_facturas_reverso)
-    GROUP BY cliente_id, evento_id
+    GROUP BY cliente_id, evento_id, metodo_pago_id
   )
   SELECT COUNT(*)
   INTO v_later_saldo_count
@@ -96,6 +96,7 @@ BEGIN
     FROM historial_saldo h
     WHERE h.cliente_id = sp.cliente_id
       AND h.evento_id = sp.evento_id
+      AND h.metodo_pago_id IS NOT DISTINCT FROM sp.metodo_pago_id
       AND h.factura_id NOT IN (SELECT id FROM tmp_facturas_reverso)
       AND h.created_at > sp.min_selected_at
   );
@@ -107,14 +108,17 @@ BEGIN
   PERFORM 1
   FROM saldo_clientes s
   JOIN (
-    SELECT DISTINCT ON (h.cliente_id, h.evento_id)
+    SELECT DISTINCT ON (h.cliente_id, h.evento_id, h.metodo_pago_id)
       h.cliente_id,
       h.evento_id,
+      h.metodo_pago_id,
       h.saldo_anterior
     FROM historial_saldo h
     WHERE h.factura_id IN (SELECT id FROM tmp_facturas_reverso)
-    ORDER BY h.cliente_id, h.evento_id, h.created_at ASC, h.id ASC
-  ) p ON p.cliente_id = s.cliente_id AND p.evento_id = s.evento_id
+    ORDER BY h.cliente_id, h.evento_id, h.metodo_pago_id, h.created_at ASC, h.id ASC
+  ) p ON p.cliente_id = s.cliente_id
+      AND p.evento_id = s.evento_id
+      AND p.metodo_pago_id IS NOT DISTINCT FROM s.metodo_pago_id
   FOR UPDATE OF s;
 
   SELECT jsonb_agg(
@@ -159,20 +163,22 @@ BEGIN
   RETURNING id INTO v_reverso_id;
 
   WITH primeras AS (
-    SELECT DISTINCT ON (h.cliente_id, h.evento_id)
+    SELECT DISTINCT ON (h.cliente_id, h.evento_id, h.metodo_pago_id)
       h.cliente_id,
       h.evento_id,
+      h.metodo_pago_id,
       h.saldo_anterior
     FROM historial_saldo h
     WHERE h.factura_id IN (SELECT id FROM tmp_facturas_reverso)
-    ORDER BY h.cliente_id, h.evento_id, h.created_at ASC, h.id ASC
+    ORDER BY h.cliente_id, h.evento_id, h.metodo_pago_id, h.created_at ASC, h.id ASC
   )
   UPDATE saldo_clientes s
   SET saldo = p.saldo_anterior,
       updated_at = now()
   FROM primeras p
   WHERE s.cliente_id = p.cliente_id
-    AND s.evento_id = p.evento_id;
+    AND s.evento_id = p.evento_id
+    AND s.metodo_pago_id IS NOT DISTINCT FROM p.metodo_pago_id;
 
   UPDATE formularios_consentimiento fc
   SET factura_ids = COALESCE(

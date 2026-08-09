@@ -54,7 +54,7 @@ import {
 } from '@/lib/api/facturas';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
-import { fetchSaldoCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientoSaldo } from '@/lib/api/saldo';
+import { fetchSaldosCliente, fetchSaldoPorCliente, fetchHistorialSaldoEvento, registrarMovimientosSaldoFactura, type SaldoMetodoPago } from '@/lib/api/saldo';
 import { enviarTicketsACola, esperarTrabajoImpresion, type PosTicket } from '@/lib/api/pos-printer';
 import type { FacturaVista } from '@/lib/types';
 
@@ -66,6 +66,17 @@ interface MetodoPagoLocal {
   cuponNombre?: string;
   cuponNumero?: number;
   entregablesCalculados?: number;
+  saldoAnterior?: number;
+  saldoNuevo?: number;
+}
+
+interface MovimientoSaldoPendiente {
+  metodoPagoId: string;
+  metodoPagoNombre: string;
+  cuponAplicado: string | null;
+  saldoAnterior: number;
+  saldoNuevo: number;
+  ticketsGenerados: number;
 }
 
 interface FacturaPendiente {
@@ -99,6 +110,7 @@ interface FacturaPendiente {
   cuponAplicado: string | null;
   saldoAnterior: number;
   saldoNuevo: number;
+  movimientosSaldo: MovimientoSaldoPendiente[];
 }
 
 const TICKET_PAPER_CHARS = 42;
@@ -255,20 +267,20 @@ export function Registro() {
   const [confirmandoPdf, setConfirmandoPdf] = useState(false);
   const [motivoReverso, setMotivoReverso] = useState('');
   const [clienteId, setClienteId] = useState<string | null>(null);
-  const [saldoAnterior, setSaldoAnterior] = useState<number>(0);
+  const [saldosCliente, setSaldosCliente] = useState<SaldoMetodoPago[]>([]);
   const [mostrarHistorialSaldo, setMostrarHistorialSaldo] = useState(false);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [historialSaldoData, setHistorialSaldoData] = useState<Array<{
     id: string; numero_factura: string; monto_factura: number; local_nombre: string;
-    cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string;
+    metodo_pago_id: string | null; metodo_pago_nombre: string; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string;
   }>>([]);
   // Estados para la pestaña de consulta de saldo
   const [cedulaConsulta, setCedulaConsulta] = useState('');
   const [consultandoSaldo, setConsultandoSaldo] = useState(false);
   const [resultadoSaldo, setResultadoSaldo] = useState<{
     cliente: { nombre: string; apellido: string; cedula: string } | null;
-    saldos: Array<{ evento_id: string; evento_nombre: string; saldo: number; updated_at: string }>;
-    historial: Array<{ id: string; evento_nombre: string; numero_factura: string; monto_factura: number; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string }>;
+    saldos: Array<{ evento_id: string; evento_nombre: string; metodo_pago_id: string | null; metodo_pago_nombre: string; saldo: number; updated_at: string }>;
+    historial: Array<{ id: string; evento_nombre: string; numero_factura: string; monto_factura: number; metodo_pago_id: string | null; metodo_pago_nombre: string; cupon_aplicado: string | null; saldo_anterior: number; saldo_nuevo: number; tickets_generados: number; created_at: string }>;
   } | null>(null);
 
   useEffect(() => {
@@ -395,10 +407,35 @@ export function Registro() {
     return Math.max(totalFactura - calcularTotalMetodos(), 0);
   };
 
+  const saldosPorMetodo = useMemo(
+    () => Object.fromEntries(
+      saldosCliente
+        .filter((saldo) => saldo.metodo_pago_id)
+        .map((saldo) => [saldo.metodo_pago_id as string, Number(saldo.saldo)]),
+    ),
+    [saldosCliente],
+  );
+
+  const saldoHistoricoSinClasificar = useMemo(
+    () => saldosCliente
+      .filter((saldo) => !saldo.metodo_pago_id)
+      .reduce((total, saldo) => total + Number(saldo.saldo), 0),
+    [saldosCliente],
+  );
+
+  const resumenSaldosEvento = useMemo(
+    () => (eventoSeleccionado?.evento_cupones ?? []).map((config) => ({
+      metodoPagoId: config.metodo_pago_id,
+      metodoPagoNombre: metodosPagoDisponibles.find((metodo) => metodo.id === config.metodo_pago_id)?.nombre ?? 'Método de pago',
+      saldo: config.metodo_pago_id ? (saldosPorMetodo[config.metodo_pago_id] ?? 0) : 0,
+    })).filter((item) => item.metodoPagoId),
+    [eventoSeleccionado, metodosPagoDisponibles, saldosPorMetodo],
+  );
+
   const calcularResultadoMetodos = (
     evento: EventoActivo | undefined,
     metodos: MetodoPagoLocal[],
-    saldoActual: number,
+    saldosActuales: Record<string, number>,
     acumulaSaldo = true,
   ) => {
     const valorMinimo = evento?.valor_minimo ?? 0;
@@ -408,7 +445,7 @@ export function Registro() {
     if (!valorMinimo || valorMinimo <= 0 || !Number.isFinite(montoFactura) || montoFactura <= 0) {
       return {
         tickets: 0,
-        saldoNuevo: parseFloat(saldoActual.toFixed(2)),
+        saldosNuevos: { ...saldosActuales },
         excedenteDescartado: 0,
         metodos: metodos.map((metodo) => ({ ...metodo, entregablesCalculados: 0 })),
       };
@@ -418,12 +455,13 @@ export function Registro() {
     const excedenteDescartado = valorMaximo > 0 ? Math.max(montoFactura - valorMaximo, 0) : 0;
     let montoPermitidoRestante = montoPermitido;
     let tickets = 0;
-    let saldoNuevo = acumulaSaldo ? 0 : saldoActual;
+    const saldosNuevos = { ...saldosActuales };
 
-    const metodosCalculados = metodos.map((metodo, index) => {
+    const metodosCalculados = metodos.map((metodo) => {
       const montoAplicable = Math.min(metodo.monto, montoPermitidoRestante);
       montoPermitidoRestante = Math.max(montoPermitidoRestante - montoAplicable, 0);
-      const saldoAplicable = acumulaSaldo && index === 0 ? saldoActual : 0;
+      const saldoMetodo = saldosActuales[metodo.id] ?? 0;
+      const saldoAplicable = acumulaSaldo ? saldoMetodo : 0;
       const montoDisponible = montoAplicable + saldoAplicable;
       const multiplicador = Math.max(metodo.cuponNumero ?? 1, 1);
       const ticketsBase = Math.floor(montoDisponible / valorMinimo);
@@ -432,33 +470,47 @@ export function Registro() {
 
       if (acumulaSaldo) {
         const unidadesBaseConsumidas = Math.ceil(ticketsMetodo / multiplicador);
-        saldoNuevo += Math.max(montoDisponible - (unidadesBaseConsumidas * valorMinimo), 0);
+        saldosNuevos[metodo.id] = Math.max(montoDisponible - (unidadesBaseConsumidas * valorMinimo), 0);
       }
 
-      return { ...metodo, entregablesCalculados: ticketsMetodo };
+      return {
+        ...metodo,
+        entregablesCalculados: ticketsMetodo,
+        saldoAnterior: saldoMetodo,
+        saldoNuevo: parseFloat((saldosNuevos[metodo.id] ?? saldoMetodo).toFixed(2)),
+      };
     });
 
     return {
       tickets,
-      saldoNuevo: parseFloat(saldoNuevo.toFixed(2)),
+      saldosNuevos: Object.fromEntries(
+        Object.entries(saldosNuevos).map(([metodoId, saldo]) => [metodoId, parseFloat(saldo.toFixed(2))]),
+      ),
       excedenteDescartado: parseFloat(excedenteDescartado.toFixed(2)),
       metodos: metodosCalculados,
     };
   };
 
-  const calcularSaldoAGenerar = () => {
-    if (metodosPago.length === 0) return null;
+  const calcularSaldosAGenerar = () => {
+    if (!eventoSeleccionado) return [];
     const evento = eventosActivos.find((e) => e.id === eventoId);
     const montoFactura = parseFloat(montoTotal);
-    if (!evento || !Number.isFinite(montoFactura) || montoFactura <= 0) return null;
+    if (!evento || !Number.isFinite(montoFactura) || montoFactura <= 0 || metodosPago.length === 0) {
+      return resumenSaldosEvento;
+    }
     const parametros = resolverParametrosCalculo(evento, localId);
     const resultado = calcularResultadoMetodos(
       { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo },
       metodosPago,
-      saldoAnterior,
+      saldosPorMetodo,
       parametros.acumulaSaldo,
     );
-    return parametros.acumulaSaldo ? resultado.saldoNuevo : 0;
+    return resumenSaldosEvento.map((saldo) => ({
+      ...saldo,
+      saldo: parametros.acumulaSaldo
+        ? (resultado.saldosNuevos[saldo.metodoPagoId as string] ?? saldo.saldo)
+        : saldo.saldo,
+    }));
   };
 
   useEffect(() => {
@@ -468,10 +520,10 @@ export function Registro() {
 
   useEffect(() => {
     if (!clienteId || !eventoId) {
-      setSaldoAnterior(0);
+      setSaldosCliente([]);
       return;
     }
-    fetchSaldoCliente(clienteId, eventoId).then(setSaldoAnterior).catch(() => setSaldoAnterior(0));
+    fetchSaldosCliente(clienteId, eventoId).then(setSaldosCliente).catch(() => setSaldosCliente([]));
   }, [clienteId, eventoId]);
 
   const validarEventoVigente = (evento?: EventoActivo) => {
@@ -535,6 +587,11 @@ export function Registro() {
       (m) => m.id === metodoSeleccionado
     )?.nombre || '';
 
+    if (metodosPago.some((metodo) => metodo.id === metodoSeleccionado)) {
+      toast.error('Este método de pago ya fue agregado. Elimínalo si necesitas cambiar su monto.');
+      return;
+    }
+
     // Obtener número del cupón (multiplicador)
     let cuponNumero = 1; // Por defecto sin cupón = multiplicador 1
     let cuponNombre: string | undefined = undefined;
@@ -566,7 +623,7 @@ export function Registro() {
     const resultadoFactura = calcularResultadoMetodos(
       evento ? { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo } : undefined,
       nuevosMetodos,
-      saldoAnterior,
+      saldosPorMetodo,
       parametros.acumulaSaldo,
     );
 
@@ -590,7 +647,7 @@ export function Registro() {
     const resultado = calcularResultadoMetodos(
       evento ? { ...evento, valor_minimo: parametros.valorMinimo, valor_maximo: parametros.valorMaximo } : undefined,
       metodosRestantes,
-      saldoAnterior,
+      saldosPorMetodo,
       parametros.acumulaSaldo,
     );
     setMetodosPago(resultado.metodos);
@@ -625,7 +682,7 @@ export function Registro() {
     setGenero('');
     setUltimaCedulaConsultada('');
     setClienteId(null);
-    setSaldoAnterior(0);
+    setSaldosCliente([]);
     setEventoId('');
     setLocalId('');
     limpiarFactura();
@@ -811,10 +868,18 @@ export function Registro() {
         valor_maximo: parametrosCalculo.valorMaximo,
       } : undefined,
       metodosPago,
-      saldoAnterior,
+      saldosPorMetodo,
       parametrosCalculo.acumulaSaldo,
     );
     const metodosPagoCalculados = resultadoFactura.metodos;
+    const movimientosSaldo: MovimientoSaldoPendiente[] = metodosPagoCalculados.map((metodo) => ({
+      metodoPagoId: metodo.id,
+      metodoPagoNombre: metodo.nombre,
+      cuponAplicado: metodo.cuponNombre ?? null,
+      saldoAnterior: metodo.saldoAnterior ?? 0,
+      saldoNuevo: metodo.saldoNuevo ?? (metodo.saldoAnterior ?? 0),
+      ticketsGenerados: metodo.entregablesCalculados ?? 0,
+    }));
 
     if (resultadoFactura.excedenteDescartado > 0) {
       toast.warning(
@@ -850,11 +915,23 @@ export function Registro() {
       metodosPago: metodosPagoCalculados,
       totalEntregables: resultadoFactura.tickets,
       cuponAplicado: obtenerCuponAplicado(metodosPagoCalculados),
-      saldoAnterior,
-      saldoNuevo: resultadoFactura.saldoNuevo,
+      saldoAnterior: movimientosSaldo.reduce((total, movimiento) => total + movimiento.saldoAnterior, 0),
+      saldoNuevo: movimientosSaldo.reduce((total, movimiento) => total + movimiento.saldoNuevo, 0),
+      movimientosSaldo,
     };
-    setFacturasPendientes([nuevaFactura, ...facturasPendientes]);
-    setSaldoAnterior(resultadoFactura.saldoNuevo);
+    setFacturasPendientes([...facturasPendientes, nuevaFactura]);
+    setSaldosCliente((actuales) => {
+      const porMetodo = new Map(actuales.map((saldo) => [saldo.metodo_pago_id, saldo]));
+      movimientosSaldo.forEach((movimiento) => {
+        porMetodo.set(movimiento.metodoPagoId, {
+          metodo_pago_id: movimiento.metodoPagoId,
+          metodo_pago_nombre: movimiento.metodoPagoNombre,
+          saldo: movimiento.saldoNuevo,
+          updated_at: new Date().toISOString(),
+        });
+      });
+      return Array.from(porMetodo.values());
+    });
     limpiarFactura();
   };
 
@@ -939,14 +1016,11 @@ export function Registro() {
 
         // 3. Registrar movimiento de saldo (se guarda aquí, independiente de la impresión)
         try {
-          await registrarMovimientoSaldo({
+          await registrarMovimientosSaldoFactura({
             clienteId: cliente.id,
             eventoId: fp.eventoId,
             facturaId: factura.id,
-            cuponAplicado: fp.cuponAplicado,
-            saldoAnterior: fp.saldoAnterior,
-            saldoNuevo: fp.saldoNuevo,
-            ticketsGenerados: fp.totalEntregables,
+            movimientos: fp.movimientosSaldo,
           });
         } catch (saldoError) {
           console.error('No se pudo registrar el movimiento de saldo', saldoError);
@@ -1599,24 +1673,33 @@ export function Registro() {
                 <h3 className="text-lg font-semibold mb-4">Métodos de Pago</h3>
 
                 {clienteId && eventoId && (
-                  <div className="flex items-center justify-between rounded-md bg-amber-50 border border-amber-200 px-4 py-3 mb-4">
-                    <div className="flex items-center gap-3 text-sm">
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50/70 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
-                        <span className="text-amber-700 text-xs uppercase tracking-wide font-medium">Saldo acumulado</span>
-                        <p className="text-2xl font-bold text-amber-800 tabular-nums leading-tight">${saldoAnterior.toFixed(2)}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Saldos por forma de pago</p>
+                        <p className="text-xs text-amber-800">Cada saldo se utiliza únicamente con el mismo método.</p>
                       </div>
-                      {saldoAnterior > 0 && (
-                        <span className="text-amber-600 text-xs">Se aplicará al primer método de pago</span>
+                      <Button variant="outline" size="sm" className="shrink-0 border-amber-300 text-amber-700 hover:bg-amber-100" onClick={abrirHistorialSaldo}>
+                        Ver historial
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {resumenSaldosEvento.map((saldo) => (
+                        <div key={saldo.metodoPagoId} className="rounded-md border border-amber-200 bg-white px-3 py-2">
+                          <p className="truncate text-xs font-medium text-amber-700">{saldo.metodoPagoNombre}</p>
+                          <p className="text-xl font-bold tabular-nums text-amber-900">${Number(saldo.saldo).toFixed(2)}</p>
+                        </div>
+                      ))}
+                      {saldoHistoricoSinClasificar > 0 && (
+                        <div className="rounded-md border border-dashed border-amber-300 bg-white/70 px-3 py-2">
+                          <p className="truncate text-xs font-medium text-amber-700">Saldo histórico sin clasificar</p>
+                          <p className="text-xl font-bold tabular-nums text-amber-900">${saldoHistoricoSinClasificar.toFixed(2)}</p>
+                        </div>
                       )}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-amber-700 border-amber-300 hover:bg-amber-100 shrink-0"
-                      onClick={abrirHistorialSaldo}
-                    >
-                      Ver historial
-                    </Button>
+                    {saldoHistoricoSinClasificar > 0 && (
+                      <p className="mt-3 text-xs font-medium text-amber-800">El saldo histórico sin clasificar se conserva, pero no se aplica automáticamente a ningún método.</p>
+                    )}
                   </div>
                 )}
 
@@ -1668,6 +1751,13 @@ export function Registro() {
                       Método
                     </Button>
                   </div>
+
+                  {metodoSeleccionado && (
+                    <div className="md:col-span-4 -mt-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" aria-live="polite">
+                      Saldo disponible en <strong>{metodosPagoDisponibles.find((metodo) => metodo.id === metodoSeleccionado)?.nombre}</strong>:
+                      <strong className="ml-1 tabular-nums">${(saldosPorMetodo[metodoSeleccionado] ?? 0).toFixed(2)}</strong>
+                    </div>
+                  )}
                 </div>
 
                 {metodosPago.length > 0 && (
@@ -1681,9 +1771,9 @@ export function Registro() {
                           <div className="flex items-center gap-4 flex-wrap">
                             <span className="font-medium">{metodo.nombre}</span>
                             <span className="text-gray-600">${metodo.monto.toFixed(2)}</span>
-                            {index === 0 && saldoAnterior > 0 && (
+                            {(metodo.saldoAnterior ?? 0) > 0 && (
                               <span className="text-xs text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
-                                + ${saldoAnterior.toFixed(2)} saldo
+                                + ${(metodo.saldoAnterior ?? 0).toFixed(2)} saldo de {metodo.nombre}
                               </span>
                             )}
                             {metodo.cuponNombre && (
@@ -1694,6 +1784,7 @@ export function Registro() {
                             <Badge variant="default" className="bg-green-600">
                               {metodo.entregablesCalculados} {metodo.entregablesCalculados === 1 ? 'ticket' : 'tickets'}
                             </Badge>
+                            <span className="text-xs font-medium text-amber-700">Nuevo saldo: ${(metodo.saldoNuevo ?? 0).toFixed(2)}</span>
                           </div>
                           <Button
                             variant="ghost"
@@ -1719,12 +1810,23 @@ export function Registro() {
                         </span>
                       </div>
                       {(() => {
-                        const saldoAGenerar = calcularSaldoAGenerar();
-                        if (saldoAGenerar === null) return null;
+                        const saldosAGenerar = calcularSaldosAGenerar();
                         return (
-                          <div className="flex justify-between items-center">
-                            <span className="font-semibold text-amber-700">Saldo a acumular:</span>
-                            <span className="text-lg font-bold text-amber-600">${saldoAGenerar.toFixed(2)}</span>
+                          <div className="rounded-md border border-amber-200 bg-amber-50/70 p-3">
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <span className="font-semibold text-amber-800">Saldo a acumular</span>
+                              {!parametrosCalculoActual.acumulaSaldo && (
+                                <span className="text-xs font-semibold text-amber-700">La regla aplicada no acumula saldo</span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              {saldosAGenerar.map((saldo) => (
+                                <div key={saldo.metodoPagoId} className="flex items-center justify-between rounded border border-amber-200 bg-white px-3 py-2">
+                                  <span className="text-sm font-medium text-amber-900">{saldo.metodoPagoNombre}</span>
+                                  <span className="text-lg font-bold tabular-nums text-amber-700">${Number(saldo.saldo).toFixed(2)}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         );
                       })()}
@@ -1930,15 +2032,16 @@ export function Registro() {
                   </div>
 
                   <div>
-                    <h3 className="font-semibold mb-3">Saldo actual por campaña</h3>
+                    <h3 className="font-semibold mb-3">Saldo actual por campaña y forma de pago</h3>
                     {resultadoSaldo.saldos.length === 0 ? (
                       <p className="text-sm text-gray-500">Sin saldo registrado en ninguna campaña</p>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {resultadoSaldo.saldos.map((s) => (
-                          <div key={s.evento_id} className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex justify-between items-center">
+                          <div key={`${s.evento_id}-${s.metodo_pago_id ?? 'legacy'}`} className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex justify-between items-center gap-4">
                             <div>
                               <p className="font-medium text-amber-900">{s.evento_nombre}</p>
+                              <p className="text-sm font-semibold text-amber-800">{s.metodo_pago_nombre}</p>
                               <p className="text-xs text-amber-700">Actualizado: {new Date(s.updated_at).toLocaleString('es-EC')}</p>
                             </div>
                             <p className="text-2xl font-bold text-amber-800 tabular-nums">${Number(s.saldo).toFixed(2)}</p>
@@ -1960,6 +2063,7 @@ export function Registro() {
                               <TableHead>Fecha</TableHead>
                               <TableHead>Campaña</TableHead>
                               <TableHead>No. Factura</TableHead>
+                              <TableHead>Método de pago</TableHead>
                               <TableHead>Cupón</TableHead>
                               <TableHead className="text-right">Monto Factura</TableHead>
                               <TableHead className="text-right">Saldo Anterior</TableHead>
@@ -1976,6 +2080,7 @@ export function Registro() {
                                   <TableCell className="text-sm">{new Date(h.created_at).toLocaleString('es-EC')}</TableCell>
                                   <TableCell className="text-sm">{h.evento_nombre}</TableCell>
                                   <TableCell className="text-sm font-mono">{h.numero_factura}</TableCell>
+                                  <TableCell className="text-sm font-medium">{h.metodo_pago_nombre}</TableCell>
                                   <TableCell className="text-sm">{h.cupon_aplicado ?? '—'}</TableCell>
                                   <TableCell className="text-right tabular-nums">${Number(h.monto_factura).toFixed(2)}</TableCell>
                                   <TableCell className="text-right tabular-nums">${Number(h.saldo_anterior).toFixed(2)}</TableCell>
@@ -2005,8 +2110,8 @@ export function Registro() {
           <div className="px-6 pt-6 pb-4 border-b shrink-0">
             <h2 className="text-lg font-semibold leading-tight">Historial de Saldo — {nombre} {apellido}</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              {eventosActivos.find((e) => e.id === eventoId)?.nombre ?? ''} · Saldo actual:
-              <span className="font-bold text-amber-700 ml-1">${saldoAnterior.toFixed(2)}</span>
+              {eventosActivos.find((e) => e.id === eventoId)?.nombre ?? ''} · Saldo total clasificado:
+              <span className="font-bold text-amber-700 ml-1">${Object.values(saldosPorMetodo).reduce((total, saldo) => total + saldo, 0).toFixed(2)}</span>
             </p>
           </div>
 
@@ -2027,6 +2132,7 @@ export function Registro() {
                     <TableHead className="whitespace-nowrap">Fecha</TableHead>
                     <TableHead className="whitespace-nowrap">No. Factura</TableHead>
                     <TableHead className="whitespace-nowrap">Local</TableHead>
+                    <TableHead className="whitespace-nowrap">Método de pago</TableHead>
                     <TableHead className="whitespace-nowrap">Cupón</TableHead>
                     <TableHead className="text-right whitespace-nowrap">Monto</TableHead>
                     <TableHead className="text-right whitespace-nowrap">Saldo Anterior</TableHead>
@@ -2043,6 +2149,7 @@ export function Registro() {
                         <TableCell className="text-sm whitespace-nowrap">{new Date(h.created_at).toLocaleString('es-EC')}</TableCell>
                         <TableCell className="font-mono text-sm whitespace-nowrap">{h.numero_factura}</TableCell>
                         <TableCell className="text-sm whitespace-nowrap">{h.local_nombre}</TableCell>
+                        <TableCell className="text-sm font-medium whitespace-nowrap">{h.metodo_pago_nombre}</TableCell>
                         <TableCell className="text-sm whitespace-nowrap">{h.cupon_aplicado ?? '—'}</TableCell>
                         <TableCell className="text-right tabular-nums whitespace-nowrap">${Number(h.monto_factura).toFixed(2)}</TableCell>
                         <TableCell className="text-right tabular-nums whitespace-nowrap">${Number(h.saldo_anterior).toFixed(2)}</TableCell>
@@ -2106,24 +2213,20 @@ export function Registro() {
                         </div>
                       </div>
 
-                      {facturaActual.acumulaSaldoAplicado && (facturaActual.saldoAnterior > 0 || facturaActual.saldoNuevo > 0) && (
+                      {facturaActual.acumulaSaldoAplicado && facturaActual.movimientosSaldo.length > 0 && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm">
-                          <h4 className="font-semibold text-amber-800 mb-2">Saldo Acumulado</h4>
-                          <div className="grid grid-cols-3 gap-4 text-center">
-                            <div>
-                              <p className="text-amber-700 text-xs uppercase tracking-wide">Saldo anterior</p>
-                              <p className="font-bold text-amber-900 tabular-nums">${facturaActual.saldoAnterior.toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <p className="text-amber-700 text-xs uppercase tracking-wide">Monto efectivo (1er método)</p>
-                              <p className="font-bold text-amber-900 tabular-nums">
-                                ${((facturaActual.metodosPago[0]?.monto ?? 0) + facturaActual.saldoAnterior).toFixed(2)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-amber-700 text-xs uppercase tracking-wide">Nuevo saldo</p>
-                              <p className="font-bold text-amber-900 tabular-nums">${facturaActual.saldoNuevo.toFixed(2)}</p>
-                            </div>
+                          <h4 className="font-semibold text-amber-800 mb-3">Saldo por forma de pago</h4>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {facturaActual.movimientosSaldo.map((movimiento) => (
+                              <div key={movimiento.metodoPagoId} className="rounded-md border border-amber-200 bg-white/70 p-3">
+                                <p className="font-semibold text-amber-900">{movimiento.metodoPagoNombre}</p>
+                                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-800">
+                                  <span>Anterior: <strong>${movimiento.saldoAnterior.toFixed(2)}</strong></span>
+                                  <span>Tickets: <strong>{movimiento.ticketsGenerados}</strong></span>
+                                  <span>Nuevo: <strong>${movimiento.saldoNuevo.toFixed(2)}</strong></span>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -2162,39 +2265,40 @@ export function Registro() {
                   ))}
                 </div>
               </div>
-              <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t bg-white px-6 py-4">
+              <div className="grid shrink-0 grid-cols-3 gap-2 border-t bg-white px-4 py-4 sm:gap-3 sm:px-6">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={cerrarTicketsSinImprimir}
-                  size="lg"
+                  size="default"
+                  className="min-w-0 whitespace-nowrap px-2 text-xs sm:px-4 sm:text-sm"
                   disabled={ticketsImpresos || marcandoImpresion || cerrandoSinImprimir || reversandoRegistro}
                 >
                   {cerrandoSinImprimir ? (
-                    <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />
+                    <LoaderCircle className="mr-1.5 hidden h-4 w-4 animate-spin min-[520px]:block" />
                   ) : (
-                    <X className="mr-2 h-5 w-5" />
+                    <X className="mr-1.5 hidden h-4 w-4 min-[520px]:block" />
                   )}
                   {cerrandoSinImprimir ? 'Guardando...' : 'Cerrar sin imprimir'}
                 </Button>
                 <Button
                   variant="outline"
                   onClick={() => setMostrarConfirmacionReverso(true)}
-                  size="lg"
-                  className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  size="default"
+                  className="min-w-0 whitespace-nowrap border-red-200 px-2 text-xs text-red-700 hover:bg-red-50 hover:text-red-800 sm:px-4 sm:text-sm"
                   disabled={ticketsImpresos || marcandoImpresion || cerrandoSinImprimir || reversandoRegistro}
                 >
                   {reversandoRegistro ? (
-                    <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
+                    <LoaderCircle className="mr-1.5 hidden h-4 w-4 animate-spin min-[520px]:block" />
                   ) : (
-                    <RotateCcw className="w-5 h-5 mr-2" />
+                    <RotateCcw className="mr-1.5 hidden h-4 w-4 min-[520px]:block" />
                   )}
                   Reversar registro
                 </Button>
                 <Button
                   onClick={imprimirTickets}
-                  size="lg"
-                  className="bg-blue-600 hover:bg-blue-700"
+                  size="default"
+                  className="min-w-0 whitespace-nowrap bg-blue-600 px-2 text-xs hover:bg-blue-700 sm:px-4 sm:text-sm"
                   disabled={
                     ticketsImpresos ||
                     marcandoImpresion ||
@@ -2204,19 +2308,19 @@ export function Registro() {
                   }
                 >
                   {marcandoImpresion ? (
-                    <LoaderCircle className="w-5 h-5 mr-2 animate-spin" />
+                    <LoaderCircle className="mr-1.5 hidden h-4 w-4 animate-spin min-[520px]:block" />
                   ) : (
-                    <Printer className="w-5 h-5 mr-2" />
+                    <Printer className="mr-1.5 hidden h-4 w-4 min-[520px]:block" />
                   )}
-                  {ticketsImpresos ? 'Tickets impresos' : marcandoImpresion ? 'Enviando...' : 'Imprimir todos los tickets'}
+                  {ticketsImpresos ? 'Tickets impresos' : marcandoImpresion ? 'Enviando...' : 'Imprimir tickets'}
                 </Button>
                 {user?.rol === 'Admin' && mostrarOpcionPdfAdmin && !ticketsImpresos && (
                   <Button
                     type="button"
                     variant="outline"
                     onClick={imprimirTicketsEnPdf}
-                    size="lg"
-                    className="border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                    size="default"
+                    className="col-span-3 w-full border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
                     disabled={marcandoImpresion || cerrandoSinImprimir || reversandoRegistro || facturasActuales.every((f) => f.totalEntregables === 0)}
                   >
                     <FileDown className="w-5 h-5 mr-2" />
