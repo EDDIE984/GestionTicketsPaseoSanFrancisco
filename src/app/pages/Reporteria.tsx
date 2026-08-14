@@ -377,7 +377,7 @@ export function Reporteria() {
         'Acumula saldo': factura.acumula_saldo_aplicado === false ? 'No' : 'Sí',
         'Tickets impresos': factura.tickets_impresos ? 'Sí' : 'No',
         'Fecha impresión': formatDate(factura.tickets_impresos_at),
-        'Acepta términos y condiciones': consentimiento?.acepta_proteccion_datos ? 'Sí' : 'No',
+        'Política protección de datos': consentimiento?.acepta_proteccion_datos ? 'Sí' : 'No',
         'Acepta publicidad': consentimiento?.acepta_publicidad ? 'Sí' : 'No',
         'Fecha aceptación': formatDate(consentimiento?.fecha_aceptacion),
         'Correo consentimiento enviado': formatDate(consentimiento?.correo_enviado_at),
