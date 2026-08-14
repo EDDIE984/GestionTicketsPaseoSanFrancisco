@@ -9,12 +9,14 @@ import { fetchConsentimiento, guardarConsentimiento, type ConsentimientoPublico 
 
 const POLITICA_URL =
   'https://paseosanfrancisco.ec/wp-content/uploads/2026/03/politica-tratamiento-datos-paseo-act-1.pdf';
+const CONSENTIMIENTO_URL =
+  'https://paseosanfrancisco.ec/wp-content/uploads/2026/08/CONSENTIMIENTO-CLIENTES-PARA-ACEPTACION-EN-APLICACION.pdf';
 
 export function Consentimiento() {
   const { token } = useParams();
   const [data, setData] = useState<ConsentimientoPublico | null>(null);
   const [aceptaPublicidad, setAceptaPublicidad] = useState(false);
-  const aceptaProteccionDatos = true;
+  const [aceptaProteccionDatos, setAceptaProteccionDatos] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
@@ -27,7 +29,8 @@ export function Consentimiento() {
   const hayCambiosSinGuardar = Boolean(
     guardado &&
     preferenciasGuardadas &&
-    aceptaPublicidad !== preferenciasGuardadas.aceptaPublicidad
+    (aceptaPublicidad !== preferenciasGuardadas.aceptaPublicidad ||
+      aceptaProteccionDatos !== preferenciasGuardadas.aceptaProteccionDatos)
   );
 
   useEffect(() => {
@@ -43,11 +46,14 @@ export function Consentimiento() {
         const yaFueGuardado = Boolean(consentimiento.fecha_aceptacion);
         setData(consentimiento);
         setAceptaPublicidad(yaFueGuardado ? Boolean(consentimiento.acepta_publicidad) : false);
+        setAceptaProteccionDatos(
+          yaFueGuardado ? Boolean(consentimiento.acepta_proteccion_datos) : false
+        );
         setGuardado(yaFueGuardado);
         setPreferenciasGuardadas(yaFueGuardado
           ? {
               aceptaPublicidad: Boolean(consentimiento.acepta_publicidad),
-              aceptaProteccionDatos: true,
+              aceptaProteccionDatos: Boolean(consentimiento.acepta_proteccion_datos),
             }
           : null);
       } catch (err) {
@@ -94,7 +100,7 @@ export function Consentimiento() {
           <CardHeader>
             <CardTitle>Confirmación de preferencias</CardTitle>
             <CardDescription>
-              Revisa tus datos y confirma el consentimiento para completar el registro.
+              Revisa tus datos y guarda tus preferencias para completar el registro.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -157,15 +163,16 @@ export function Consentimiento() {
                   <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
                     <Checkbox
                       id="proteccionDatos"
-                      checked
-                      disabled
-                      aria-readonly="true"
+                      checked={aceptaProteccionDatos}
+                      onCheckedChange={(checked) => setAceptaProteccionDatos(Boolean(checked))}
                     />
                     <div className="space-y-3">
-                      <Label htmlFor="proteccionDatos" className="cursor-default leading-relaxed text-slate-800">
+                      <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
                         He leído y acepto la política de protección de datos
                       </Label>
-                      <p className="text-xs text-slate-500">Esta aceptación es obligatoria para completar el registro y no puede modificarse.</p>
+                      <p className="text-xs text-slate-500">
+                        Puedes guardar tu respuesta tanto si aceptas como si no aceptas.
+                      </p>
                       <div className="flex flex-wrap gap-3">
                         <a
                           href={POLITICA_URL}
@@ -177,7 +184,7 @@ export function Consentimiento() {
                           <ExternalLink className="h-4 w-4" />
                         </a>
                         <a
-                          href={POLITICA_URL}
+                          href={CONSENTIMIENTO_URL}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
@@ -197,13 +204,16 @@ export function Consentimiento() {
                 )}
 
                 <div className="flex justify-end border-t border-slate-200 pt-4">
-                  <Button onClick={enviar} disabled={guardando || (guardado && !hayCambiosSinGuardar)}>
+                  <Button
+                    onClick={enviar}
+                    disabled={guardando || (guardado && !hayCambiosSinGuardar)}
+                  >
                     {guardando && <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />}
                     {guardado
                       ? hayCambiosSinGuardar
                         ? 'Guardar cambios'
                         : 'Preferencias guardadas'
-                      : 'Enviar aceptación'}
+                      : 'Guardar preferencias'}
                   </Button>
                 </div>
               </>

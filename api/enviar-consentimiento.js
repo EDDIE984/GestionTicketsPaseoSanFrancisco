@@ -125,7 +125,7 @@ export default async function handler(request, response) {
       token,
       token_expira_at: expiresAt,
       acepta_publicidad: false,
-      acepta_proteccion_datos: true,
+      acepta_proteccion_datos: false,
       correo_enviado_at: null,
       updated_at: now.toISOString(),
     };

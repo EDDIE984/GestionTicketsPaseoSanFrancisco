@@ -29,11 +29,10 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'POST') {
-    const { token, aceptaPublicidad } = request.body ?? {};
+    const { token, aceptaPublicidad, aceptaProteccionDatos } = request.body ?? {};
     if (!token) {
       return response.status(400).json({ message: 'Token inválido' });
     }
-
     const { data: existing, error: existingError } = await supabase
       .from('formularios_consentimiento')
       .select('id, token_expira_at, fecha_aceptacion')
@@ -51,11 +50,12 @@ export default async function handler(request, response) {
       .from('formularios_consentimiento')
       .update({
         acepta_publicidad: aceptaPublicidad === true,
-        acepta_proteccion_datos: true,
+        acepta_proteccion_datos: aceptaProteccionDatos === true,
         fecha_aceptacion: existing.fecha_aceptacion ?? now,
         formulario_enviado_at: now,
         ip: request.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? request.socket?.remoteAddress ?? null,
         user_agent: request.headers['user-agent'] ?? null,
+        updated_at: now,
       })
       .eq('id', existing.id);
 

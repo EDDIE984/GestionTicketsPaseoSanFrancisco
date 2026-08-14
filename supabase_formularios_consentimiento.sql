@@ -15,8 +15,8 @@ CREATE TABLE IF NOT EXISTS formularios_consentimiento (
   token_expira_at          TIMESTAMPTZ NOT NULL,
   correo_enviado_at        TIMESTAMPTZ,
   formulario_enviado_at    TIMESTAMPTZ,
-  acepta_publicidad        BOOLEAN NOT NULL DEFAULT true,
-  acepta_proteccion_datos  BOOLEAN NOT NULL DEFAULT true,
+  acepta_publicidad        BOOLEAN NOT NULL DEFAULT false,
+  acepta_proteccion_datos  BOOLEAN NOT NULL DEFAULT false,
   fecha_aceptacion         TIMESTAMPTZ,
   ip                       TEXT,
   user_agent               TEXT,
@@ -29,3 +29,15 @@ CREATE INDEX IF NOT EXISTS idx_formularios_consentimiento_token
 
 CREATE INDEX IF NOT EXISTS idx_formularios_consentimiento_cliente_id
   ON formularios_consentimiento(cliente_id);
+
+ALTER TABLE formularios_consentimiento
+  ALTER COLUMN acepta_publicidad SET DEFAULT false,
+  ALTER COLUMN acepta_proteccion_datos SET DEFAULT false;
+
+-- Los formularios aún no enviados no representan una aceptación del usuario.
+UPDATE formularios_consentimiento
+SET acepta_proteccion_datos = false,
+    updated_at = now()
+WHERE fecha_aceptacion IS NULL
+  AND formulario_enviado_at IS NULL
+  AND acepta_proteccion_datos = true;
