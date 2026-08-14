@@ -154,10 +154,16 @@ export function Consentimiento() {
                       checked={aceptaPublicidad}
                       onCheckedChange={(checked) => setAceptaPublicidad(Boolean(checked))}
                     />
-                    <Label htmlFor="publicidad" className="cursor-pointer leading-relaxed text-slate-800">
-                      Acepto recibir material publicitario sobre productos y servicios, y autorizo que se realicen
-                      procesos de perfilamiento sobre mis datos para el envío de publicidad personalizada.
-                    </Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="publicidad" className="cursor-pointer leading-relaxed text-slate-800">
+                        Acepto recibir material publicitario sobre productos y servicios, y autorizo que se realicen
+                        procesos de perfilamiento sobre mis datos para el envío de publicidad personalizada.
+                      </Label>
+                      <p className="text-xs leading-relaxed text-slate-500">
+                        Al marcar esta casilla, aceptas recibir material publicitario y comunicaciones promocionales.
+                        Si no deseas recibir este tipo de información, deja la casilla sin marcar.
+                      </p>
+                    </div>
                   </div>
 
                   <div className="flex items-start gap-3 rounded-lg border border-slate-200 p-4">
