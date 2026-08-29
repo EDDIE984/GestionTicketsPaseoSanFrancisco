@@ -37,6 +37,8 @@ const DATA_DIR = path.resolve(process.env.PRINTER_DATA_DIR || 'printer-connector
 const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
 const SPOOL_DIR = path.join(DATA_DIR, 'spool');
 const PAPER_CHARS = 42;
+const TICKET_TERMS_TEXT =
+  'AL PARTICIPAR EN EL PRESENTE SORTEO USTED CONOCE Y SE SOMETE A LOS TÉRMINOS Y CONDICIONES QUE SE ENCUENTRAN EN LA PÁGINA WEB DE PASEO SAN FRANCISCO WWW.PASEOSANFRANCISCO.EC';
 const CANCEL_TIMEOUT_MS = Number(process.env.PRINTER_CANCEL_TIMEOUT_MS || 5000);
 const PRINT_TIMEOUT_MS = Number(process.env.PRINTER_PRINT_TIMEOUT_MS || 30000);
 const WORKER_STARTUP_TIMEOUT_MS = Number(process.env.PRINTER_WORKER_STARTUP_TIMEOUT_MS || 600000);
@@ -326,6 +328,9 @@ function buildTicketBuffer(ticket) {
   parts.push(text('-'.repeat(PAPER_CHARS)));
   parts.push(esc(0x1b, 0x61, 0x01));
   parts.push(text(center(`${ticket.index} de ${ticket.total}`)));
+  parts.push(text(''));
+  parts.push(esc(0x1b, 0x61, 0x00)); // left
+  for (const row of wrap(TICKET_TERMS_TEXT)) parts.push(text(row));
   parts.push(text('\n'));
   parts.push(esc(0x1d, 0x56, 0x42, 0x00)); // cut
 

@@ -100,7 +100,7 @@ export function Consentimiento() {
           <CardHeader>
             <CardTitle>Confirmación de preferencias</CardTitle>
             <CardDescription>
-              Revisa tus datos y guarda tus preferencias para completar el registro.
+              Lee la política de protección de datos y guarda tus preferencias.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -159,6 +159,14 @@ export function Consentimiento() {
                         Acepto recibir material publicitario sobre productos y servicios, y autorizo que se realicen
                         procesos de perfilamiento sobre mis datos para el envío de publicidad personalizada.
                       </Label>
+                      <a
+                        href={CONSENTIMIENTO_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex break-all text-sm font-medium text-blue-700 hover:text-blue-800"
+                      >
+                        {CONSENTIMIENTO_URL}
+                      </a>
                       <p className="text-xs leading-relaxed text-slate-500">
                         Al marcar esta casilla, aceptas recibir material publicitario y comunicaciones promocionales.
                         Si no deseas recibir este tipo de información, deja la casilla sin marcar.
@@ -174,7 +182,7 @@ export function Consentimiento() {
                     />
                     <div className="space-y-3">
                       <Label htmlFor="proteccionDatos" className="cursor-pointer leading-relaxed text-slate-800">
-                        He leído y acepto la política de protección de datos
+                        He leído la política de protección de datos
                       </Label>
                       <p className="text-xs text-slate-500">
                         Puedes guardar tu respuesta tanto si aceptas como si no aceptas.
@@ -187,15 +195,6 @@ export function Consentimiento() {
                           className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
                         >
                           Ver política
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                        <a
-                          href={CONSENTIMIENTO_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
-                        >
-                          Ver consentimiento
                           <ExternalLink className="h-4 w-4" />
                         </a>
                       </div>

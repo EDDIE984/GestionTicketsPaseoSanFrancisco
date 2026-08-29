@@ -114,6 +114,8 @@ interface FacturaPendiente {
 }
 
 const TICKET_PAPER_CHARS = 42;
+const TEXTO_TERMINOS_TICKET =
+  'AL PARTICIPAR EN EL PRESENTE SORTEO USTED CONOCE Y SE SOMETE A LOS TÉRMINOS Y CONDICIONES QUE SE ENCUENTRAN EN LA PÁGINA WEB DE PASEO SAN FRANCISCO WWW.PASEOSANFRANCISCO.EC';
 const FACTURA_MAX_LENGTH = 17;
 const FACTURA_FORMAT_REGEX = /^\d{3}-\d{3}-\d{9}$/;
 const FACTURA_FORMAT_LABEL = '001-001-000000397';
@@ -1154,6 +1156,8 @@ export function Registro() {
     `Fecha/Hora: ${normalizarTextoTicket(ticket.fechaHora)}`,
     '-'.repeat(TICKET_PAPER_CHARS),
     centrarLineaTicket(`${ticket.index} de ${ticket.total}`),
+    '',
+    ...envolverLineaTicket(TEXTO_TERMINOS_TICKET),
   ];
 
   const construirTicketsPos = (): PosTicket[] => {
