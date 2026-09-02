@@ -163,9 +163,9 @@ export function Consentimiento() {
                         href={CONSENTIMIENTO_URL}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex break-all text-sm font-medium text-blue-700 hover:text-blue-800"
+                        className="inline-flex text-sm font-medium text-blue-700 hover:text-blue-800"
                       >
-                        {CONSENTIMIENTO_URL}
+                        Ver consentimiento
                       </a>
                       <p className="text-xs leading-relaxed text-slate-500">
                         Al marcar esta casilla, aceptas recibir material publicitario y comunicaciones promocionales.
