@@ -687,11 +687,11 @@ export function Reporteria() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <BarChart data={datosCanjeLocal.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={datosCanjeLocal.slice(0, 8)} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tickFormatter={(value) => formatMoney(value)} />
-                        <YAxis dataKey="nombre" type="category" width={96} tick={{ fontSize: 10 }} />
+                        <YAxis dataKey="nombre" type="category" width={140} tick={{ fontSize: 9 }} interval={0} tickMargin={4} />
                         <Tooltip formatter={(value) => formatMoney(Number(value))} />
                         <Bar dataKey="total" fill="#0f766e" barSize={16} radius={[0, 4, 4, 0]} />
                       </BarChart>
