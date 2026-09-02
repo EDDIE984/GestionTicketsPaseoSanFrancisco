@@ -129,6 +129,37 @@ function getDateParts(dateValue: string) {
   };
 }
 
+const ECUADOR_TIME_ZONE = 'America/Guayaquil';
+
+// fecha_registro es un TIMESTAMPTZ en UTC; hay que llevarlo a hora de Ecuador
+// (UTC-5, sin horario de verano) antes de extraer el día calendario, de lo
+// contrario una factura grabada de noche cae en el día siguiente.
+function getDatePartsEnEcuador(dateValue: string | null | undefined) {
+  if (!dateValue) return null;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ECUADOR_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const year = Number(partes.find((p) => p.type === 'year')?.value);
+  const month = Number(partes.find((p) => p.type === 'month')?.value);
+  const day = Number(partes.find((p) => p.type === 'day')?.value);
+
+  if (!year || !month || !day) return null;
+
+  return {
+    year,
+    month: month - 1,
+    day,
+  };
+}
+
 function formatDate(dateValue: string | null | undefined) {
   if (!dateValue) return '';
   const date = new Date(dateValue);
@@ -281,7 +312,7 @@ export function Reporteria() {
     const hasta = diaHasta === 'todos' ? null : Number(diaHasta);
 
     return facturas.filter((factura) => {
-      const dateParts = getDateParts(factura.fecha_emision);
+      const dateParts = getDatePartsEnEcuador(factura.fecha_registro);
       if (!dateParts) return mesesSeleccionados.length === 0 && desde === null && hasta === null;
       const { year, month, day } = dateParts;
       if (anioSeleccionado !== null && year !== anioSeleccionado) return false;
@@ -312,7 +343,7 @@ export function Reporteria() {
   const datosCanjeLocal = useMemo(() => {
     const grupos = facturasFiltradas.reduce((acc, factura) => {
       const local = factura.locales?.nombre ?? 'Sin local';
-      acc[local] = (acc[local] ?? 0) + parseNumber(factura.total_entregables);
+      acc[local] = (acc[local] ?? 0) + parseNumber(factura.monto_total);
       return acc;
     }, {} as Record<string, number>);
 
@@ -343,7 +374,7 @@ export function Reporteria() {
 
     return diasDelMes.filter((dia) => dia >= desde && dia <= hasta).map((dia) => {
       const total = facturasFiltradas
-        .filter((factura) => getDateParts(factura.fecha_emision)?.day === dia)
+        .filter((factura) => getDatePartsEnEcuador(factura.fecha_registro)?.day === dia)
         .reduce((sum, factura) => sum + parseNumber(factura.total_entregables), 0);
       return { dia, total };
     });
@@ -460,7 +491,7 @@ export function Reporteria() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Calendar className="h-4 w-4" />
-                Mes de emisión
+                Mes de ingreso
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -659,9 +690,9 @@ export function Reporteria() {
                     <ResponsiveContainer width="100%" height={240}>
                       <BarChart data={datosCanjeLocal.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" tickFormatter={(value) => formatMiles(value)} />
+                        <XAxis type="number" tickFormatter={(value) => formatMoney(value)} />
                         <YAxis dataKey="nombre" type="category" width={96} tick={{ fontSize: 10 }} />
-                        <Tooltip formatter={(value) => formatMiles(Number(value))} />
+                        <Tooltip formatter={(value) => formatMoney(Number(value))} />
                         <Bar dataKey="total" fill="#0f766e" barSize={16} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -707,7 +738,7 @@ export function Reporteria() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Calendar className="h-5 w-5" />
-                    Canje por día de emisión
+                    Canje por día de ingreso
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
