@@ -107,6 +107,27 @@ export async function existsFacturaByNumero(
   return Boolean(data);
 }
 
+export async function countFacturasByEventoId(eventoId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('facturas')
+    .select('id', { count: 'exact', head: true })
+    .eq('evento_id', eventoId);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+export async function deleteFacturasByEventoId(eventoId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('facturas')
+    .delete()
+    .eq('evento_id', eventoId)
+    .select('id');
+
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
 export async function fetchFacturasDelDia(): Promise<FacturaVista[]> {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];

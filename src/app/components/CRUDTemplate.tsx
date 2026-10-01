@@ -26,6 +26,12 @@ interface Column<T> {
   render?: (item: T) => React.ReactNode;
 }
 
+interface DeleteConfirmation {
+  title?: string;
+  description: React.ReactNode;
+  confirmLabel?: string;
+}
+
 interface CRUDTemplateProps<T> {
   title: string;
   description: string;
@@ -39,6 +45,7 @@ interface CRUDTemplateProps<T> {
     onChange: (field: keyof T, value: any) => void
   ) => React.ReactNode;
   getItemId: (item: T) => string | number;
+  renderDeleteConfirmation?: (item: T) => DeleteConfirmation;
 }
 
 export function CRUDTemplate<T extends Record<string, any>>({
@@ -51,12 +58,13 @@ export function CRUDTemplate<T extends Record<string, any>>({
   onDelete,
   renderForm,
   getItemId,
+  renderDeleteConfirmation,
 }: CRUDTemplateProps<T>) {
   const navigate = useNavigate();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<Partial<T> | null>(null);
-  const [itemToDelete, setItemToDelete] = useState<string | number | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<T | null>(null);
   const [formData, setFormData] = useState<Partial<T>>({});
 
   const handleOpenDialog = (item?: T) => {
@@ -89,18 +97,21 @@ export function CRUDTemplate<T extends Record<string, any>>({
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleDeleteClick = (id: string | number) => {
-    setItemToDelete(id);
+  const handleDeleteClick = (item: T) => {
+    setItemToDelete(item);
     setIsDeleteDialogOpen(true);
   };
 
   const handleConfirmDelete = () => {
     if (itemToDelete !== null) {
-      onDelete(itemToDelete);
+      onDelete(getItemId(itemToDelete));
       setIsDeleteDialogOpen(false);
       setItemToDelete(null);
     }
   };
+
+  const deleteConfirmation =
+    itemToDelete && renderDeleteConfirmation ? renderDeleteConfirmation(itemToDelete) : null;
 
   return (
     <div className="p-8">
@@ -174,7 +185,7 @@ export function CRUDTemplate<T extends Record<string, any>>({
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteClick(getItemId(item))}
+                          onClick={() => handleDeleteClick(item)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
                           title="Eliminar"
                         >
@@ -215,14 +226,17 @@ export function CRUDTemplate<T extends Record<string, any>>({
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+            <AlertDialogTitle>{deleteConfirmation?.title ?? '¿Estás seguro?'}</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción no se puede deshacer. Se eliminará permanentemente este registro.
+              {deleteConfirmation?.description ??
+                'Esta acción no se puede deshacer. Se eliminará permanentemente este registro.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDelete}>Eliminar</AlertDialogAction>
+            <AlertDialogAction onClick={handleConfirmDelete}>
+              {deleteConfirmation?.confirmLabel ?? 'Eliminar'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

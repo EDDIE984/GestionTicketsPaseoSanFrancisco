@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { EventoCampana, EventoCuponConfiguracion, EventoReglaCalculo } from '@/lib/types';
+import { deleteFacturasByEventoId } from '@/lib/api/facturas';
 
 type RawEvento = {
   id: string;
@@ -167,10 +168,19 @@ export async function updateEvento(
   return fetchEventoById(id);
 }
 
-export async function deleteEvento(id: string): Promise<void> {
-  // Las tablas pivote tienen ON DELETE CASCADE, se eliminan automáticamente
+export async function deleteEvento(id: string): Promise<{ facturasEliminadas: number }> {
+  // Las facturas tienen FK RESTRICT hacia eventos_campanas, así que deben
+  // eliminarse explícitamente primero (el usuario ya fue advertido de esto
+  // en la UI). Al borrarlas se eliminan en cascada factura_metodos_pago e
+  // historial_saldo asociados. Las tablas pivote del evento y el
+  // saldo_clientes/historial_saldo del evento tienen ON DELETE CASCADE y se
+  // eliminan automáticamente al borrar la fila de eventos_campanas.
+  const facturasEliminadas = await deleteFacturasByEventoId(id);
+
   const { error } = await supabase.from('eventos_campanas').delete().eq('id', id);
   if (error) throw error;
+
+  return { facturasEliminadas };
 }
 
 async function fetchEventoById(id: string): Promise<EventoCampana> {

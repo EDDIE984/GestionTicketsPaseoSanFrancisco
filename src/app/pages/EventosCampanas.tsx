@@ -20,6 +20,7 @@ import { fetchCupones } from '@/lib/api/cupones';
 import { fetchEntregables } from '@/lib/api/entregables';
 import { fetchLocales } from '@/lib/api/locales';
 import { fetchMetodosPago } from '@/lib/api/metodos-pago';
+import { countFacturasByEventoId } from '@/lib/api/facturas';
 
 const toDateTimeInputValue = (value?: string) => {
   if (!value) return '';
@@ -237,9 +238,22 @@ export function EventosCampanas() {
   const [entregables, setEntregables] = useState<Entregable[]>([]);
   const [locales, setLocales] = useState<Local[]>([]);
   const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
+  const [facturaCounts, setFacturaCounts] = useState<Record<string, number>>({});
+
+  const loadFacturaCounts = async (lista: EventoCampana[]) => {
+    const entries = await Promise.all(
+      lista.map(async (e) => [e.id, await countFacturasByEventoId(e.id).catch(() => 0)] as const)
+    );
+    setFacturaCounts(Object.fromEntries(entries));
+  };
 
   useEffect(() => {
-    fetchEventos().then(setEventos).catch(() => toast.error('Error al cargar eventos'));
+    fetchEventos()
+      .then((data) => {
+        setEventos(data);
+        loadFacturaCounts(data);
+      })
+      .catch(() => toast.error('Error al cargar eventos'));
     fetchCategorias().then(setCategorias).catch(() => {});
     fetchCupones().then(setCupones).catch(() => {});
     fetchEntregables().then(setEntregables).catch(() => {});
@@ -309,11 +323,52 @@ export function EventosCampanas() {
 
   const handleDelete = async (id: string | number) => {
     try {
-      await deleteEvento(String(id));
+      const { facturasEliminadas } = await deleteEvento(String(id));
       setEventos((prev) => prev.filter((e) => e.id !== String(id)));
-    } catch {
-      toast.error('Error al eliminar el evento');
+      setFacturaCounts((prev) => {
+        const next = { ...prev };
+        delete next[String(id)];
+        return next;
+      });
+      toast.success(
+        facturasEliminadas > 0
+          ? `Evento y ${facturasEliminadas} factura(s) asociada(s) eliminados correctamente`
+          : 'Evento eliminado correctamente'
+      );
+    } catch (error) {
+      toast.error('Error al eliminar el evento', {
+        description: getErrorMessage(error),
+        duration: 10000,
+      });
     }
+  };
+
+  const renderDeleteConfirmation = (evento: EventoCampana) => {
+    const count = facturaCounts[evento.id] ?? 0;
+
+    if (count === 0) {
+      return {
+        title: `¿Eliminar "${evento.nombre}"?`,
+        description: 'Esta acción no se puede deshacer. Se eliminará permanentemente este evento.',
+        confirmLabel: 'Eliminar',
+      };
+    }
+
+    return {
+      title: `¿Eliminar "${evento.nombre}"?`,
+      description: (
+        <>
+          Este evento tiene <strong>{count}</strong> factura{count === 1 ? '' : 's'} registrada
+          {count === 1 ? '' : 's'}. Al eliminar el evento también se eliminarán permanentemente
+          esas facturas, sus métodos de pago y el saldo acumulado / historial de saldo de los
+          clientes asociado a este evento.
+          <br />
+          <br />
+          Esta acción no se puede deshacer. ¿Deseas continuar?
+        </>
+      ),
+      confirmLabel: `Eliminar evento y ${count} factura${count === 1 ? '' : 's'}`,
+    };
   };
 
   const renderForm = (
@@ -616,6 +671,7 @@ export function EventosCampanas() {
       onDelete={handleDelete}
       renderForm={renderForm as any}
       getItemId={(item) => item.id}
+      renderDeleteConfirmation={renderDeleteConfirmation}
     />
   );
 }
